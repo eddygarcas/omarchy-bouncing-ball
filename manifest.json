@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "id": "eduard.bouncing-ball",
+  "name": "Bouncing Ball",
+  "version": "1.0.0",
+  "author": "Eduard G. Castelló",
+  "license": "MIT",
+  "homepage": "https://github.com/eddygarcas/omarchy-bouncing-ball",
+  "description": "A customizable ball that bounces around your screen, Amiga Boing Ball style.",
+  "kinds": [
+    "service",
+    "bar-widget",
+    "overlay"
+  ],
+  "keepLoaded": true,
+  "entryPoints": {
+    "service": "Service.qml",
+    "barWidget": "Panel.qml",
+    "overlay": "Overlay.qml"
+  },
+  "barWidget": {
+    "displayName": "Bouncing Ball",
+    "description": "Start a customizable ball bouncing across your screen",
+    "category": "Widgets",
+    "allowMultiple": false,
+    "defaultSection": "right"
+  }
+}
