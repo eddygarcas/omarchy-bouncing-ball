@@ -219,6 +219,37 @@ Panel {
               }
             }
           }
+
+          Column {
+            width: parent.width
+            spacing: Style.space(6)
+            visible: root.svc && root.svc.style === "image"
+
+            Button {
+              width: parent.width
+              leftAlign: true
+              text: root.svc && root.svc.imagePickerRunning
+                ? "Choosing…"
+                : (root.svc && root.svc.imagePath ? "Change Image…" : "Choose Image…")
+              fontSize: Style.font.bodySmall
+              foreground: root.bar.foreground
+              fontFamily: root.bar.fontFamily
+              bordered: true
+              enabled: !(root.svc && root.svc.imagePickerRunning)
+              opacity: enabled ? 1.0 : 0.6
+              onClicked: if (root.svc) root.svc.pickImage()
+            }
+
+            Text {
+              visible: !!(root.svc && root.svc.imagePath)
+              text: root.svc ? root.svc.imagePath.split("/").pop() : ""
+              color: Qt.darker(root.bar.foreground, 1.4)
+              font.family: root.bar.fontFamily
+              font.pixelSize: Style.font.caption
+              elide: Text.ElideMiddle
+              width: parent.width
+            }
+          }
         }
 
         // ---------- Size ----------

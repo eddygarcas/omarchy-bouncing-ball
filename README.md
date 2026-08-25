@@ -40,7 +40,8 @@ Click the bar icon (a plain circle) to open the panel:
 
 - **Bounce!** — starts/stops the ball.
 - **Style** — Amiga (red/white checker sphere), Solid (pick from 6 colors),
-  or Rainbow (continuously cycling hue).
+  or Image (wrap a picture of your own around it — click **Choose Image…**
+  to pick one from `~/Pictures` via Omarchy's own image picker).
 - **Size** — S / M / L / XL.
 - **Speed** — Chill / Normal / Fast / Turbo.
 - **Physics** — Classic bounce (constant velocity, bounces off all four
@@ -82,32 +83,45 @@ and nothing persists once it's off.
 - **Settings don't persist** across `omarchy restart shell` — resets to
   Amiga / Medium / Normal / Classic bounce each time. In-memory only, no
   config file, since this is a toy rather than something worth persisting.
-- **The Amiga checker isn't a pixel-exact sphere projection**, but it's
-  close. Latitude bands are spaced by `r*sin(latitude)` so they genuinely
-  compress near the top/bottom like a real sphere's foreshortening, and each
-  wedge's left/right edges are sampled along the actual projected meridian
-  ellipse (`x = r*sin(theta)*cos(phi)`, `y = r*sin(phi)`) instead of
-  straight radii to the center, so the checker pattern reads as a wrapped
-  sphere rather than a pinwheel. Wedges whose entire longitude span faces
-  away from the viewer (`cos(theta) < 0`) are culled before drawing --
-  without that, front and back wedges land on the exact same screen pixels
-  under orthographic projection, and painter's-order overdraw made the two
-  halves of the ball appear to spin in opposite directions as `phase`
-  advanced. The remaining inexactness is just the sampling: each meridian
-  edge is approximated with a handful of line segments rather than a true
-  curve, which is visually indistinguishable at the current band count but
-  would show as faceting if `latBands`/`meridianSamples` were lowered a lot.
-- **Do not reintroduce per-pixel canvas rendering for the Amiga texture.**
-  An earlier version used `createImageData`/`putImageData` to reconstruct
-  each pixel's 3D position for a mathematically exact sphere projection. It
-  looked right, but reliably froze the entire Omarchy shell after roughly
-  15-25 seconds of continuous repainting -- confirmed via CPU-monitored soak
-  tests, independent of texture resolution, throttling, or the input-region
-  mask. The current implementation avoids that path entirely, drawing only
-  with vector primitives (`arc`/`clip`/`fillRect`/`moveTo`/`lineTo`, the
-  same kind used everywhere else in this plugin, soak-tested clean at 45+
-  seconds continuous with flat CPU). If you improve the sphere accuracy,
-  keep it on that side of the line.
+- **Neither the Amiga checker nor the Image style is a pixel-exact sphere
+  projection**, but both are close. Both are tessellated into the same grid
+  of lat/lon cells: latitude bands are spaced by `r*sin(latitude)` so they
+  genuinely compress near the top/bottom like a real sphere's
+  foreshortening, and each cell's left/right edges are sampled along the
+  actual projected meridian ellipse (`x = r*sin(theta)*cos(phi)`, `y =
+  r*sin(phi)`) instead of straight radii to the center, so both read as
+  wrapped around a sphere rather than flat pie slices. Cells whose entire
+  longitude span faces away from the viewer (`cos(theta) < 0`) are culled
+  before drawing -- without that, front and back cells land on the exact
+  same screen pixels under orthographic projection, and painter's-order
+  overdraw made the two halves of the ball appear to spin in opposite
+  directions as `phase` advanced. Two more approximations: each meridian
+  edge is a handful of line segments rather than a true curve (invisible at
+  the current band count, would show as faceting if `latBands` were lowered
+  a lot), and adjacent cells are deliberately given a small (~4%) overlap
+  ("bleed") rather than sharing an exact boundary -- two independently
+  clipped draws that share a mathematically exact edge still leave a faint
+  anti-aliased seam where neither is fully opaque, which reads as thin grid
+  lines through an Image texture and extra "grout" on the checker.
+- **Do not reintroduce per-pixel canvas rendering for the Amiga/Image
+  textures.** An earlier version used `createImageData`/`putImageData` to
+  reconstruct each pixel's 3D position for a mathematically exact sphere
+  projection. It looked right, but reliably froze the entire Omarchy shell
+  after roughly 15-25 seconds of continuous repainting -- confirmed via
+  CPU-monitored soak tests, independent of texture resolution, throttling,
+  or the input-region mask. The current implementation avoids that path
+  entirely: both styles draw only with vector primitives and single
+  GPU-backed blits (`arc`/`clip`/`fillRect`/`moveTo`/`lineTo`/`drawImage`,
+  never a raw pixel buffer read/write), soak-tested clean with flat CPU and
+  no RSS growth over a minute of continuous Image-style repainting. If you
+  improve the sphere accuracy, keep it on that side of the line.
+- **The Image style's texture mapping is equirectangular** (the same flat
+  layout as a world map), which is the standard approach for wrapping a 2D
+  image around a sphere -- but it assumes the source image already reads as
+  that kind of map. Wrapping an arbitrary photo (especially one with its
+  own perspective and background, like a photo of an object) produces a
+  warped, sliced look rather than a clean "sticker on a ball" result. This
+  is inherent to equirectangular mapping, not a bug in the slicing.
 
 ## Permissions & dependencies
 
@@ -115,6 +129,12 @@ and nothing persists once it's off.
 - Runs entirely inside the shared `omarchy-shell` process via a background
   service, a bar-widget settings panel, and a full-screen click-through
   overlay -- no separate processes, no files written to disk.
+- **Choose Image…** shells out to `omarchy-menu-images` (ships with
+  Omarchy) pointed at `~/Pictures`, the same fullscreen picker used for
+  wallpapers and themes, rather than this plugin reimplementing a file
+  browser. It's a real subprocess (`Quickshell.Io.Process`), so it can't
+  block the shell; only the picked file's path comes back, read from its
+  own stdout.
 - Keep Awake uses the standard Wayland `idle-inhibit-v1` protocol (via
   Quickshell's `IdleInhibitor`) to block screensaver/lock/suspend while it's
   on -- the same mechanism any idle-inhibiting app uses, not a custom
@@ -130,7 +150,7 @@ and nothing persists once it's off.
 |----------------|-----------------------------------------------------------------|
 | `manifest.json`| Plugin manifest (`service` + `bar-widget` + `overlay`)          |
 | `Panel.qml`    | Bar icon + settings panel                                       |
-| `Service.qml`  | Background physics state (position, velocity, style, IPC)       |
+| `Service.qml`  | Background physics + Keep Awake + image-picker state, IPC        |
 | `Overlay.qml`  | Full-screen click-through window that renders the ball          |
 | `Model.js`     | Presets, physics step function, and the ball-drawing routines   |
 

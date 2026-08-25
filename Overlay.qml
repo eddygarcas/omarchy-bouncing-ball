@@ -1,6 +1,7 @@
 import QtQuick
 import Quickshell
 import Quickshell.Wayland
+import qs.Commons
 import "Model.js" as Model
 
 Item {
@@ -69,6 +70,22 @@ Item {
       }
     }
 
+    // Backs the "image" style: the source texture wrapped around the ball
+    // in Model.drawImageSphere. Loaded via the QML Image element (not
+    // Canvas.loadImage(url)) so its natural pixel size is available as
+    // sourceSize -- the equirectangular source-rect math needs real pixels,
+    // not the destination canvas size.
+    Image {
+      id: textureImage
+      visible: false
+      asynchronous: true
+      cache: true
+      source: root.service && root.service.style === "image" && root.service.imagePath
+        ? Util.fileUrl(root.service.imagePath)
+        : ""
+      onStatusChanged: if (status === Image.Ready) canvas.requestPaint()
+    }
+
     Canvas {
       id: canvas
       visible: !!(root.service && root.service.enabled)
@@ -80,7 +97,13 @@ Item {
       onPaint: {
         if (!root.service) return
         var ctx = getContext("2d")
-        Model.drawBall(ctx, root.service.size, root.service.style, root.service.color, root.service.rotation)
+        var useImage = root.service.style === "image" && textureImage.status === Image.Ready
+        Model.drawBall(
+          ctx, root.service.size, root.service.style, root.service.color, root.service.rotation,
+          useImage ? textureImage : null,
+          useImage ? textureImage.sourceSize.width : 0,
+          useImage ? textureImage.sourceSize.height : 0
+        )
       }
 
       // Position (x/y) updates every physics tick via plain item bindings
@@ -101,6 +124,7 @@ Item {
         function onStyleChanged() { canvas.requestPaint() }
         function onColorChanged() { canvas.requestPaint() }
         function onSizeChanged() { canvas.requestPaint() }
+        function onImagePathChanged() { canvas.requestPaint() }
       }
 
       // Click the ball to boop it back into the air -- offset from center

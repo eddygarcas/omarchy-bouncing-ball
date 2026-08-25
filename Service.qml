@@ -1,4 +1,5 @@
 import QtQuick
+import Quickshell
 import Quickshell.Io
 import "Model.js" as Model
 
@@ -25,6 +26,12 @@ QtObject {
   property real rotation: 0
   property real viewportWidth: 1920
   property real viewportHeight: 1080
+
+  // Absolute path to the image last picked for the "image" style. Chosen via
+  // pickImage(), which shells out to Omarchy's own image picker rather than
+  // reimplementing a file browser -- see the Process below.
+  property string imagePath: ""
+  property bool imagePickerRunning: false
 
   // Keep Awake: an opt-in mode that bounces the ball (as a visible "why is
   // my screen still on" indicator) while inhibiting the system idle
@@ -78,6 +85,31 @@ QtObject {
   function toggleKeepAwake() {
     if (root.keepAwake) root.stopKeepAwake()
     else root.startKeepAwake(root.keepAwakeMinutes)
+  }
+
+  // Opens Omarchy's own image picker (the same fullscreen carousel used for
+  // wallpapers/themes) pointed at ~/Pictures, rather than this plugin
+  // reimplementing a file browser. `omarchy-menu-images` owns the whole
+  // summon/select/wait dance and just blocks until it can print the chosen
+  // path (or nothing, if cancelled) -- safe to shell out to since it's a
+  // separate process, not something that blocks this Quickshell instance.
+  function pickImage() {
+    if (root.imagePickerRunning) return
+    root.imagePickerRunning = true
+    imagePickerProcess.command = ["omarchy-menu-images", Quickshell.env("HOME") + "/Pictures"]
+    imagePickerProcess.running = true
+  }
+
+  property Process imagePickerProcess: Process {
+    stdout: StdioCollector { id: imagePickerStdout; waitForEnd: true }
+    onExited: function(exitCode, exitStatus) {
+      root.imagePickerRunning = false
+      var path = imagePickerStdout.text ? imagePickerStdout.text.trim() : ""
+      if (path.length > 0) {
+        root.imagePath = path
+        root.style = "image"
+      }
+    }
   }
 
   function setSpeed(value) {
@@ -153,7 +185,9 @@ QtObject {
         viewportWidth: root.viewportWidth, viewportHeight: root.viewportHeight,
         keepAwake: root.keepAwake,
         keepAwakeMinutes: root.keepAwakeMinutes,
-        keepAwakeEndsAt: root.keepAwakeEndsAt
+        keepAwakeEndsAt: root.keepAwakeEndsAt,
+        imagePath: root.imagePath,
+        imagePickerRunning: root.imagePickerRunning
       })
     }
     // Mirror what the settings panel's buttons already do, so a keybinding
@@ -164,5 +198,6 @@ QtObject {
     function setSpeedIpc(value: string): string { root.setSpeed(Number(value)); return String(root.speed) }
     function keepAwakeStart(value: string): string { root.startKeepAwake(Number(value)); return String(root.keepAwakeMinutes) }
     function keepAwakeStop(): string { root.stopKeepAwake(); return "stopped" }
+    function pickImage(): string { root.pickImage(); return root.imagePickerRunning ? "picking" : "busy" }
   }
 }

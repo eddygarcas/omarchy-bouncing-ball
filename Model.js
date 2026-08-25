@@ -15,7 +15,7 @@ var speedPresets = [
 var stylePresets = [
   { label: "Amiga", value: "amiga" },
   { label: "Solid", value: "solid" },
-  { label: "Rainbow", value: "rainbow" }
+  { label: "Image", value: "image" }
 ]
 
 var physicsPresets = [
@@ -96,74 +96,109 @@ function step(state, dt) {
 
   return s
 }
-function hueColor(hueDeg) {
-  var h = ((hueDeg % 360) + 360) % 360 / 60
-  var i = Math.floor(h)
-  var f = h - i
-  var q = 1 - f
-  var rgb
-  switch (i) {
-    case 0: rgb = [1, f, 0]; break
-    case 1: rgb = [q, 1, 0]; break
-    case 2: rgb = [0, 1, f]; break
-    case 3: rgb = [0, q, 1]; break
-    case 4: rgb = [f, 0, 1]; break
-    default: rgb = [1, 0, q]; break
+// Precomputes the `latBands + 1` latitude boundary angles and their
+// projected y-coordinates (`r*sin(lat)`), shared by every sphere-mapped
+// style so they all foreshorten toward the poles identically.
+function sphereLatBands(r, latBands) {
+  var angles = []
+  var boundaries = []
+  for (var i = 0; i <= latBands; i++) {
+    var lat = -Math.PI / 2 + (i / latBands) * Math.PI
+    angles.push(lat)
+    boundaries.push(r * Math.sin(lat))
   }
-  return "rgb(" + Math.round(rgb[0] * 255) + "," + Math.round(rgb[1] * 255) + "," + Math.round(rgb[2] * 255) + ")"
+  return { angles: angles, boundaries: boundaries }
 }
 
-// Sphere-mapped checkerboard, drawn with plain vector clips (arcs + rects +
-// sampled meridian polygons) rather than per-pixel sampling. An earlier
-// version of this reconstructed every pixel's 3D position with
-// createImageData/putImageData for a mathematically exact projection -- it
-// looked right, but repeatedly froze the whole Omarchy shell after 15-25s of
-// continuous repainting (a resource leak somewhere in that pixel-buffer
-// path, not just "slow"). This version is provably built from the same
-// clip/fill primitives already proven stable for hours of use elsewhere in
-// this plugin, plus lineTo/moveTo, which are equally cheap vector calls.
+// Clips the canvas (already save()'d and translated to the ball's center) to
+// one lat/lon cell's true curved boundary, built entirely from vector clips
+// (arcs + rects + a sampled polygon) rather than per-pixel sampling. An
+// earlier version of the checker style reconstructed every pixel's 3D
+// position with createImageData/putImageData for a mathematically exact
+// projection -- it looked right, but repeatedly froze the whole Omarchy
+// shell after 15-25s of continuous repainting (a resource leak somewhere in
+// that pixel-buffer path, not just "slow"). Every sphere-mapped style
+// (checker, image) is built from this same clip plus a plain fillRect or
+// drawImage, both cheap GPU-backed blits, never a raw pixel buffer.
 //
-// Under orthographic projection, latitude bands are spaced by `r*sin(lat)`
-// rather than evenly, so they compress near the top/bottom silhouette the
-// way a real sphere's surface foreshortens -- and at fixed latitude, a
-// wedge's top/bottom edges are exactly horizontal regardless of longitude,
-// so those are drawn as plain straight lines. But each wedge's left/right
-// edges are meridians, and a meridian projects to an arc of an ellipse
-// (x = r*sin(theta)*cos(phi), y = r*sin(phi)), not a straight line to the
-// ball's center. Sampling that curve is what keeps the checker pattern
-// reading as a wrapped sphere instead of a flat pinwheel of pie slices,
-// while `phase` still rotates it to keep the pattern fixed to the surface.
-//
+// Under orthographic projection, a wedge's top/bottom edges are exactly
+// horizontal regardless of longitude (fixed latitude -> fixed y), so those
+// are plain straight lines via `rect`. But its left/right edges are
+// meridians, and a meridian projects to an arc of an ellipse
+// (x = amp*cos(phi), y = r*sin(phi), amp = r*sin(theta)), not a straight
+// line to the ball's center -- sampling that curve is what keeps cells
+// reading as wrapped around a sphere instead of flat pie slices.
+function clipSphereCell(ctx, r, yTop, bandHeight, phiLo, phiHi, ampLeft, ampRight) {
+  var samples = 4 // segments per left/right edge; plenty smooth at this band size
+  ctx.beginPath()
+  ctx.arc(0, 0, r, 0, Math.PI * 2)
+  ctx.clip()
+  ctx.beginPath()
+  ctx.rect(-r, yTop, 2 * r, bandHeight)
+  ctx.clip()
+  ctx.beginPath()
+  for (var s = 0; s <= samples; s++) {
+    var phi = phiLo + (s / samples) * (phiHi - phiLo)
+    var x = ampLeft * Math.cos(phi)
+    var y = r * Math.sin(phi)
+    if (s === 0) ctx.moveTo(x, y)
+    else ctx.lineTo(x, y)
+  }
+  for (var t = samples; t >= 0; t--) {
+    var phi2 = phiLo + (t / samples) * (phiHi - phiLo)
+    ctx.lineTo(ampRight * Math.cos(phi2), r * Math.sin(phi2))
+  }
+  ctx.closePath()
+  ctx.clip()
+}
+
+// Expands one cell's boundary angles slightly beyond its true span before
+// it's handed to clipSphereCell. Two cells that share a mathematically exact
+// boundary still leave a faint gap where the renderer's own edge
+// anti-aliasing makes neither draw fully opaque right at the seam --
+// visible as thin grid lines through the image style, and as a bit of extra
+// "grout" on the checker style. A small overlap between neighbors papers
+// over that rather than fighting the renderer's AA directly.
+function bleedSphereCell(r, phiLo, phiHi, thetaLeft, thetaRight, lonStep) {
+  var bleedPhi = (phiHi - phiLo) * 0.04
+  var bleedTheta = lonStep * 0.04
+  var bPhiLo = phiLo - bleedPhi
+  var bPhiHi = phiHi + bleedPhi
+  var yTop = r * Math.sin(bPhiLo)
+  return {
+    phiLo: bPhiLo,
+    phiHi: bPhiHi,
+    yTop: yTop,
+    bandHeight: r * Math.sin(bPhiHi) - yTop,
+    ampLeft: r * Math.sin(thetaLeft - bleedTheta),
+    ampRight: r * Math.sin(thetaRight + bleedTheta)
+  }
+}
+
 // `theta` sweeps the full 0-2pi longitude range every frame, which covers
 // both the hemisphere facing the viewer and the one facing away -- an
 // orthographic projection maps both to the exact same 2D disc, so without
-// culling, every screen pixel gets painted twice by two unrelated wedges
-// (front and back), and whichever one the loop happens to draw last wins.
-// As `phase` advances that "last writer" flips between front and back
-// unpredictably, which read as the left and right halves spinning in
-// opposite directions. A point is front-facing (visible) exactly when
-// cos(theta) > 0 -- z = r*cos(phi)*cos(theta), and cos(phi) is never
-// negative -- so any wedge whose entire theta span is back-facing is
-// skipped, leaving only the actual visible hemisphere to paint.
+// culling, every screen pixel would get painted twice, by two unrelated
+// cells (front and back), and whichever the loop draws last would win. A
+// point is front-facing (visible) exactly when cos(theta) > 0 -- z =
+// r*cos(phi)*cos(theta), and cos(phi) is never negative -- so any cell whose
+// entire theta span is back-facing is skipped, leaving only the actual
+// visible hemisphere to paint. Both sphere-mapped styles share this test.
+function sphereCellIsBackFacing(thetaLeft, thetaRight) {
+  return Math.cos(thetaLeft) < 0 && Math.cos(thetaRight) < 0
+}
+
 function drawAmigaChecker(ctx, r, phaseRad) {
   var latBands = 10
   var lonBands = 20
   var lonStep = Math.PI * 2 / lonBands
-  var meridianSamples = 4 // segments per left/right edge; plenty smooth at this band size
-
-  var latAngles = []
-  var latBoundaries = []
-  for (var i = 0; i <= latBands; i++) {
-    var lat = -Math.PI / 2 + (i / latBands) * Math.PI
-    latAngles.push(lat)
-    latBoundaries.push(r * Math.sin(lat))
-  }
+  var bands = sphereLatBands(r, latBands)
 
   for (var bi = 0; bi < latBands; bi++) {
-    var yTop = latBoundaries[bi]
-    var bandHeight = latBoundaries[bi + 1] - yTop
-    var phiLo = latAngles[bi]
-    var phiHi = latAngles[bi + 1]
+    var yTop = bands.boundaries[bi]
+    var bandHeight = bands.boundaries[bi + 1] - yTop
+    var phiLo = bands.angles[bi]
+    var phiHi = bands.angles[bi + 1]
     // Shading follows how face-on this band is (bands near the equator sit
     // flatter toward the viewer than the compressed ones near the poles),
     // echoing the diffuse falloff a real lit sphere would show.
@@ -173,37 +208,12 @@ function drawAmigaChecker(ctx, r, phaseRad) {
     for (var wj = 0; wj < lonBands; wj++) {
       var thetaLeft = phaseRad + wj * lonStep
       var thetaRight = phaseRad + (wj + 1) * lonStep
+      if (sphereCellIsBackFacing(thetaLeft, thetaRight)) continue
 
-      // Skip wedges that are entirely back-facing (hidden behind the visible
-      // hemisphere). A wedge straddling the front/back boundary is kept --
-      // its outer edge sits right at the silhouette either way, so drawing
-      // it from "the wrong side" is visually indistinguishable there.
-      if (Math.cos(thetaLeft) < 0 && Math.cos(thetaRight) < 0) continue
-
-      var ampLeft = r * Math.sin(thetaLeft)
-      var ampRight = r * Math.sin(thetaRight)
+      var cell = bleedSphereCell(r, phiLo, phiHi, thetaLeft, thetaRight, lonStep)
 
       ctx.save()
-      ctx.beginPath()
-      ctx.arc(0, 0, r, 0, Math.PI * 2)
-      ctx.clip()
-      ctx.beginPath()
-      ctx.rect(-r, yTop, 2 * r, bandHeight)
-      ctx.clip()
-      ctx.beginPath()
-      for (var s = 0; s <= meridianSamples; s++) {
-        var phi = phiLo + (s / meridianSamples) * (phiHi - phiLo)
-        var x = ampLeft * Math.cos(phi)
-        var y = r * Math.sin(phi)
-        if (s === 0) ctx.moveTo(x, y)
-        else ctx.lineTo(x, y)
-      }
-      for (var t = meridianSamples; t >= 0; t--) {
-        var phi2 = phiLo + (t / meridianSamples) * (phiHi - phiLo)
-        ctx.lineTo(ampRight * Math.cos(phi2), r * Math.sin(phi2))
-      }
-      ctx.closePath()
-      ctx.clip()
+      clipSphereCell(ctx, r, cell.yTop, cell.bandHeight, cell.phiLo, cell.phiHi, cell.ampLeft, cell.ampRight)
       var white = (bi + wj) % 2 === 0
       ctx.fillStyle = white
         ? "rgb(" + Math.round(245 * shade) + "," + Math.round(245 * shade) + "," + Math.round(245 * shade) + ")"
@@ -214,10 +224,74 @@ function drawAmigaChecker(ctx, r, phaseRad) {
   }
 }
 
+// Wraps a user-picked image around the ball using an equirectangular
+// mapping (the same layout as a flat world map: x = longitude, y =
+// latitude), tessellated into the same lat/lon cells as drawAmigaChecker
+// and drawn with `drawImage`'s source-rect slicing -- a GPU-backed blit,
+// not a per-pixel read/write, so it's on the safe side of the constraint
+// documented on clipSphereCell. `image` must already be loaded, and
+// imgWidth/imgHeight are its natural pixel size (the source rect math needs
+// real pixels, not the destination canvas size).
+//
+// Each cell's destination rect approximates its on-screen bounding box
+// (`ampLeft`/`ampRight`, the same values that bound its clip polygon)
+// rather than the full ball width -- that's what makes the image compress
+// toward the silhouette the way the checker's own bands already do, instead
+// of every cell stretching a narrow source slice across the whole ball and
+// then clipping almost all of it away.
+function drawImageSphere(ctx, r, phaseRad, image, imgWidth, imgHeight) {
+  var latBands = 10
+  var lonBands = 20
+  var lonStep = Math.PI * 2 / lonBands
+  var srcLonStep = imgWidth / lonBands
+  var bands = sphereLatBands(r, latBands)
+
+  for (var bi = 0; bi < latBands; bi++) {
+    var yTop = bands.boundaries[bi]
+    var bandHeight = bands.boundaries[bi + 1] - yTop
+    var phiLo = bands.angles[bi]
+    var phiHi = bands.angles[bi + 1]
+    var sy = ((phiLo + Math.PI / 2) / Math.PI) * imgHeight
+    var sh = Math.max(0.5, ((phiHi - phiLo) / Math.PI) * imgHeight)
+
+    for (var wj = 0; wj < lonBands; wj++) {
+      var thetaLeft = phaseRad + wj * lonStep
+      var thetaRight = phaseRad + (wj + 1) * lonStep
+      if (sphereCellIsBackFacing(thetaLeft, thetaRight)) continue
+
+      // theta drifts by an unbounded amount as the ball spins, but each
+      // cell's angular width is always exactly lonStep -- so only the
+      // starting source-x needs wrapping into the image, via a plain
+      // mod-1 on the longitude fraction; the slice width itself is fixed.
+      var uLeft = ((thetaLeft / (Math.PI * 2)) % 1 + 1) % 1
+      var sx = Math.min(uLeft * imgWidth, Math.max(0, imgWidth - srcLonStep))
+
+      // The destination rect is deliberately built from the same bled
+      // (slightly overlapped) boundary as the clip, not the cell's true
+      // span -- drawImage only paints within its own dest rect regardless
+      // of how big the clip is, so a bled clip with a tight dest rect would
+      // still leave the seam. The source rect stays tied to the true
+      // boundary so the image mapping itself isn't skewed; the sliver of
+      // extra stretch at each cell's edge is imperceptible.
+      var cell = bleedSphereCell(r, phiLo, phiHi, thetaLeft, thetaRight, lonStep)
+      var dx = Math.min(cell.ampLeft, cell.ampRight)
+      var dw = Math.max(0.5, Math.abs(cell.ampRight - cell.ampLeft))
+
+      ctx.save()
+      clipSphereCell(ctx, r, cell.yTop, cell.bandHeight, cell.phiLo, cell.phiHi, cell.ampLeft, cell.ampRight)
+      ctx.drawImage(image, sx, sy, srcLonStep, sh, dx, cell.yTop, dw, cell.bandHeight)
+      ctx.restore()
+    }
+  }
+}
+
 // Draws the ball centered in a `size`x`size` canvas. `style` is
-// "amiga" | "solid" | "rainbow"; `phaseDeg` is the current roll rotation used
-// to spin the checker sphere (amiga) or just orient the highlight.
-function drawBall(ctx, size, style, color, phaseDeg) {
+// "amiga" | "solid" | "image"; `phaseDeg` is the current roll rotation used
+// to spin the checker/image sphere (amiga/image) or just orient the
+// highlight. `image`/`imgWidth`/`imgHeight` are only needed for "image" --
+// omit or pass a not-yet-loaded image and it falls back to a plain `color`
+// fill, same as "solid".
+function drawBall(ctx, size, style, color, phaseDeg, image, imgWidth, imgHeight) {
   var r = size / 2
   ctx.clearRect(0, 0, size, size)
 
@@ -226,12 +300,17 @@ function drawBall(ctx, size, style, color, phaseDeg) {
     ctx.translate(r, r)
     drawAmigaChecker(ctx, r, (phaseDeg || 0) * Math.PI / 180)
     ctx.restore()
+  } else if (style === "image" && image && imgWidth > 0 && imgHeight > 0) {
+    ctx.save()
+    ctx.translate(r, r)
+    drawImageSphere(ctx, r, (phaseDeg || 0) * Math.PI / 180, image, imgWidth, imgHeight)
+    ctx.restore()
   } else {
     ctx.save()
     ctx.translate(r, r)
     ctx.beginPath()
     ctx.arc(0, 0, r, 0, Math.PI * 2)
-    ctx.fillStyle = style === "rainbow" ? hueColor(phaseDeg * 2) : color
+    ctx.fillStyle = color
     ctx.fill()
     ctx.restore()
   }
@@ -269,7 +348,6 @@ if (typeof module !== "undefined") {
     colorSwatches: colorSwatches,
     clamp: clamp,
     randomVelocity: randomVelocity,
-    hueColor: hueColor,
     drawBall: drawBall,
     step: step,
     formatMinutes: formatMinutes,
