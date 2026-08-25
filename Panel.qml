@@ -100,6 +100,77 @@ Panel {
 
         PanelSeparator { foreground: root.bar.foreground }
 
+        // ---------- Keep Awake ----------
+        Column {
+          width: parent.width
+          spacing: Style.space(10)
+
+          PanelSectionHeader {
+            text: "KEEP AWAKE"
+            foreground: root.bar.foreground
+            fontFamily: root.bar.fontFamily
+          }
+
+          // Ticks once a second so the "stops in..." description below stays
+          // live without a reactive clock property on the service itself.
+          // Only runs while the panel is open and there's an actual deadline
+          // to count down to.
+          Timer {
+            id: keepAwakeTick
+            property int tick: 0
+            interval: 1000
+            repeat: true
+            running: panel.open && !!(root.svc && root.svc.keepAwake && root.svc.keepAwakeEndsAt > 0)
+            onTriggered: tick++
+          }
+
+          Toggle {
+            width: parent.width
+            label: "Keep Awake"
+            description: {
+              keepAwakeTick.tick // establishes the binding that keeps this live
+              if (!root.svc || !root.svc.keepAwake) {
+                return "Off. Bounces the ball and blocks your screen from sleeping or locking for the duration below."
+              }
+              if (root.svc.keepAwakeEndsAt <= 0) return "On — blocking sleep/lock until you turn this off."
+              return "On — blocking sleep/lock, stops in " + Model.formatRemainingMs(root.svc.keepAwakeEndsAt - Date.now()) + "."
+            }
+            checked: !!(root.svc && root.svc.keepAwake)
+            foreground: root.bar.foreground
+            fontFamily: root.bar.fontFamily
+            onClicked: if (root.svc) root.svc.toggleKeepAwake()
+          }
+
+          PanelSlider {
+            id: keepAwakeSlider
+            bar: root.bar
+            width: parent.width
+            minimum: 0
+            maximum: 180
+            step: 5
+            integer: true
+            value: root.svc ? root.svc.keepAwakeMinutes : 30
+            onMoved: function(v) { if (root.svc) root.svc.keepAwakeMinutes = v }
+            onReleased: function(v) {
+              if (!root.svc) return
+              root.svc.keepAwakeMinutes = v
+              // Re-arm a countdown already in flight so dragging the slider
+              // while Keep Awake is on takes effect immediately instead of
+              // only applying the next time it's turned on.
+              if (root.svc.keepAwake) root.svc.startKeepAwake(v)
+            }
+          }
+
+          Text {
+            text: "Duration: " + (root.svc ? Model.formatMinutes(root.svc.keepAwakeMinutes) : "30m")
+            color: Qt.darker(root.bar.foreground, 1.4)
+            font.family: root.bar.fontFamily
+            font.pixelSize: Style.font.caption
+          }
+        }
+
+        PanelSeparator { foreground: root.bar.foreground }
+
         // ---------- Style ----------
         Column {
           width: parent.width

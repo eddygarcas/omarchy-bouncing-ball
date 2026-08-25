@@ -4,7 +4,9 @@ A customizable ball that bounces around your screen, [Amiga Boing
 Ball](https://en.wikipedia.org/wiki/Amiga_Boing_Ball)-style, for
 [Omarchy](https://omarchy.org/). Click the bar icon to start/stop it and
 tweak its style, size, speed, and physics; click the ball itself to boop it
-back into the air.
+back into the air. It doubles as a "keep awake" tool: an optional mode
+bounces the ball as a visible reminder while blocking your screen from
+locking, sleeping, or dimming, for a duration you set with a slider.
 
 ## Install
 
@@ -44,6 +46,14 @@ Click the bar icon (a plain circle) to open the panel:
 - **Physics** — Classic bounce (constant velocity, bounces off all four
   edges forever, DVD-logo style) or Gravity drop (falls, loses energy each
   bounce, eventually settles and rolls along the floor).
+- **Keep Awake** — a toggle plus a slider (0 to 3 hours, in 5-minute steps;
+  0 means "until you turn it off"). Turning it on starts the ball bouncing
+  if it isn't already and inhibits the system idle cycle for the chosen
+  duration, so the screensaver, lock, and auto-suspend won't fire — handy
+  for watching a long build finish or a video call without input. It stops
+  itself automatically when the timer runs out, or turn it off (or hit
+  **Bounce!**) to end it early. Dragging the slider while it's already on
+  re-arms the countdown immediately with the new duration.
 
 Click the ball itself at any point to boop it — it kicks upward and nudges
 sideways *away* from wherever you clicked, like batting a real ball. That
@@ -55,6 +65,15 @@ Omarchy's own on-screen-display uses): everywhere except the ball itself
 stays click-through, so it never blocks the desktop underneath it. A
 background service owns the physics so it keeps running independently of
 whether the settings panel is open.
+
+Keep Awake works through the standard Wayland `idle-inhibit-v1` protocol
+(Quickshell's `IdleInhibitor`, attached to the overlay window) rather than
+touching Omarchy's own idle/lock settings or its separate built-in "Stay
+Awake" indicator — Omarchy's idle service already runs its idle detection
+with `respectInhibitors: true`, so this is the same mechanism any other
+idle-inhibiting app (a video player, a video call client) would use, and it
+stays fully self-contained: nothing outside this plugin's own state changes,
+and nothing persists once it's off.
 
 ## Known limitations
 
@@ -96,6 +115,11 @@ whether the settings panel is open.
 - Runs entirely inside the shared `omarchy-shell` process via a background
   service, a bar-widget settings panel, and a full-screen click-through
   overlay -- no separate processes, no files written to disk.
+- Keep Awake uses the standard Wayland `idle-inhibit-v1` protocol (via
+  Quickshell's `IdleInhibitor`) to block screensaver/lock/suspend while it's
+  on -- the same mechanism any idle-inhibiting app uses, not a custom
+  workaround. It only takes effect while this plugin's overlay window is
+  visible and Keep Awake is toggled on, and stops the moment either is off.
 - Like every Quickshell plugin, this code runs unsandboxed inside that
   shared process -- review `Panel.qml` / `Service.qml` / `Overlay.qml` /
   `Model.js` before installing.

@@ -29,6 +29,16 @@ Item {
     // itself to move any less smoothly.
     mask: Region { item: hitboxAnchor }
 
+    // Backs the "Keep Awake" panel toggle: this is the standard Wayland
+    // idle-inhibit-v1 protocol, which the built-in idle/lock service already
+    // respects (its IdleMonitor runs with respectInhibitors: true) -- so
+    // enabling this is enough to block screensaver/lock/suspend system-wide,
+    // with no need to reach into that other service's own state.
+    IdleInhibitor {
+      window: window
+      enabled: !!(root.service && root.service.keepAwake && root.service.enabled)
+    }
+
     onWidthChanged: if (root.service) root.service.viewportWidth = width
     onHeightChanged: if (root.service) root.service.viewportHeight = height
     Component.onCompleted: {

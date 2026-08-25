@@ -36,6 +36,27 @@ function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value))
 }
 
+// Formats the Keep Awake slider's minute value: 0 is the "no timer, run
+// until I stop it" end of the range, everything else reads as m/h.
+function formatMinutes(minutes) {
+  var n = Math.max(0, Math.round(Number(minutes) || 0))
+  if (n <= 0) return "Until stopped"
+  if (n < 60) return n + "m"
+  var hours = n / 60
+  return (hours % 1 === 0 ? hours.toFixed(0) : hours.toFixed(1)) + "h"
+}
+
+// Formats a millisecond countdown (e.g. keepAwakeEndsAt - Date.now()) for
+// the live "stops in..." status line.
+function formatRemainingMs(ms) {
+  var totalMinutes = Math.ceil(Math.max(0, Number(ms) || 0) / 60000)
+  if (totalMinutes <= 0) return "moments"
+  if (totalMinutes < 60) return totalMinutes + "m"
+  var hours = Math.floor(totalMinutes / 60)
+  var mins = totalMinutes % 60
+  return mins > 0 ? hours + "h " + mins + "m" : hours + "h"
+}
+
 function randomVelocity(speed) {
   var angle = Math.random() * Math.PI * 2
   return { vx: Math.cos(angle) * speed, vy: Math.sin(angle) * speed }
@@ -250,6 +271,8 @@ if (typeof module !== "undefined") {
     randomVelocity: randomVelocity,
     hueColor: hueColor,
     drawBall: drawBall,
-    step: step
+    step: step,
+    formatMinutes: formatMinutes,
+    formatRemainingMs: formatRemainingMs
   }
 }

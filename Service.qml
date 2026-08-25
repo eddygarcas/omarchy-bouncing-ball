@@ -26,6 +26,18 @@ QtObject {
   property real viewportWidth: 1920
   property real viewportHeight: 1080
 
+  // Keep Awake: an opt-in mode that bounces the ball (as a visible "why is
+  // my screen still on" indicator) while inhibiting the system idle
+  // cycle -- see the IdleInhibitor bound to the overlay window in
+  // Overlay.qml, which is what actually blocks the built-in idle/lock
+  // service (that service's IdleMonitor runs with respectInhibitors: true
+  // for exactly this purpose). keepAwakeMinutes is the slider's last set
+  // duration; keepAwakeEndsAt is 0 for "no timer, run until stopped" or an
+  // absolute Date.now()-based deadline otherwise.
+  property bool keepAwake: false
+  property int keepAwakeMinutes: 30
+  property double keepAwakeEndsAt: 0
+
   function start() {
     var v = Model.randomVelocity(root.speed)
     root.x = Math.max(0, root.viewportWidth / 2 - root.size / 2)
@@ -37,11 +49,35 @@ QtObject {
 
   function stop() {
     root.enabled = false
+    root.keepAwake = false
+    root.keepAwakeEndsAt = 0
   }
 
   function toggle() {
     if (root.enabled) root.stop()
     else root.start()
+  }
+
+  // Starting Keep Awake bounces the ball if it isn't already, without
+  // resetting one already in flight. `minutes` <= 0 means no auto-stop.
+  function startKeepAwake(minutes) {
+    var m = Math.max(0, Math.round(Number(minutes) || 0))
+    root.keepAwakeMinutes = m
+    root.keepAwake = true
+    root.keepAwakeEndsAt = m > 0 ? Date.now() + m * 60000 : 0
+    if (!root.enabled) root.start()
+  }
+
+  // Turns off idle-inhibiting but leaves the ball itself bouncing --
+  // stopping the ball entirely is what `stop()` is for.
+  function stopKeepAwake() {
+    root.keepAwake = false
+    root.keepAwakeEndsAt = 0
+  }
+
+  function toggleKeepAwake() {
+    if (root.keepAwake) root.stopKeepAwake()
+    else root.startKeepAwake(root.keepAwakeMinutes)
   }
 
   function setSpeed(value) {
@@ -88,6 +124,20 @@ QtObject {
     onTriggered: root.step(interval / 1000)
   }
 
+  // Polls for the Keep Awake deadline rather than firing a one-shot Timer at
+  // the exact remaining interval, so changing keepAwakeEndsAt mid-countdown
+  // (the panel's slider re-arms it live) never needs to touch a Timer's own
+  // running/interval bookkeeping -- it just changes what this check compares
+  // against next tick.
+  property Timer keepAwakeDeadlineTimer: Timer {
+    interval: 1000
+    running: root.keepAwake && root.keepAwakeEndsAt > 0
+    repeat: true
+    onTriggered: {
+      if (Date.now() >= root.keepAwakeEndsAt) root.stop()
+    }
+  }
+
   // Lets a keybinding drive the ball too, e.g.:
   //   omarchy-shell eduard.ball toggle
   property var ipc: IpcHandler {
@@ -100,7 +150,10 @@ QtObject {
         state: root.enabled ? "bouncing" : "stopped",
         x: root.x, y: root.y, vx: root.vx, vy: root.vy,
         size: root.size, style: root.style, mode: root.mode,
-        viewportWidth: root.viewportWidth, viewportHeight: root.viewportHeight
+        viewportWidth: root.viewportWidth, viewportHeight: root.viewportHeight,
+        keepAwake: root.keepAwake,
+        keepAwakeMinutes: root.keepAwakeMinutes,
+        keepAwakeEndsAt: root.keepAwakeEndsAt
       })
     }
     // Mirror what the settings panel's buttons already do, so a keybinding
@@ -109,5 +162,7 @@ QtObject {
     function setMode(value: string): string { root.mode = value; return root.mode }
     function setStyle(value: string): string { root.style = value; return root.style }
     function setSpeedIpc(value: string): string { root.setSpeed(Number(value)); return String(root.speed) }
+    function keepAwakeStart(value: string): string { root.startKeepAwake(Number(value)); return String(root.keepAwakeMinutes) }
+    function keepAwakeStop(): string { root.stopKeepAwake(); return "stopped" }
   }
 }
