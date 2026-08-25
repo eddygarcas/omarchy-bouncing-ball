@@ -93,35 +93,56 @@ function hueColor(hueDeg) {
 }
 
 // Sphere-mapped checkerboard, drawn with plain vector clips (arcs + rects +
-// pie slices) rather than per-pixel sampling. An earlier version of this
-// reconstructed every pixel's 3D position with createImageData/putImageData
-// for a mathematically exact projection -- it looked right, but repeatedly
-// froze the whole Omarchy shell after 15-25s of continuous repainting (a
-// resource leak somewhere in that pixel-buffer path, not just "slow"). This
-// version is provably built from the same clip/arc/fill primitives already
-// proven stable for hours of use elsewhere in this plugin.
+// sampled meridian polygons) rather than per-pixel sampling. An earlier
+// version of this reconstructed every pixel's 3D position with
+// createImageData/putImageData for a mathematically exact projection -- it
+// looked right, but repeatedly froze the whole Omarchy shell after 15-25s of
+// continuous repainting (a resource leak somewhere in that pixel-buffer
+// path, not just "slow"). This version is provably built from the same
+// clip/fill primitives already proven stable for hours of use elsewhere in
+// this plugin, plus lineTo/moveTo, which are equally cheap vector calls.
 //
-// It isn't a pixel-exact sphere projection, but it captures the part that
-// actually reads as spherical: latitude bands are spaced by `r*sin(lat)`
+// Under orthographic projection, latitude bands are spaced by `r*sin(lat)`
 // rather than evenly, so they compress near the top/bottom silhouette the
-// way a real sphere's surface foreshortens, instead of sitting in a flat,
-// equal-height grid. Longitude wedges are pie slices from the center that
-// rotate with `phase`, which is what keeps the checker pattern fixed to the
-// ball's surface as it spins rather than sliding on top of it.
+// way a real sphere's surface foreshortens -- and at fixed latitude, a
+// wedge's top/bottom edges are exactly horizontal regardless of longitude,
+// so those are drawn as plain straight lines. But each wedge's left/right
+// edges are meridians, and a meridian projects to an arc of an ellipse
+// (x = r*sin(theta)*cos(phi), y = r*sin(phi)), not a straight line to the
+// ball's center. Sampling that curve is what keeps the checker pattern
+// reading as a wrapped sphere instead of a flat pinwheel of pie slices,
+// while `phase` still rotates it to keep the pattern fixed to the surface.
+//
+// `theta` sweeps the full 0-2pi longitude range every frame, which covers
+// both the hemisphere facing the viewer and the one facing away -- an
+// orthographic projection maps both to the exact same 2D disc, so without
+// culling, every screen pixel gets painted twice by two unrelated wedges
+// (front and back), and whichever one the loop happens to draw last wins.
+// As `phase` advances that "last writer" flips between front and back
+// unpredictably, which read as the left and right halves spinning in
+// opposite directions. A point is front-facing (visible) exactly when
+// cos(theta) > 0 -- z = r*cos(phi)*cos(theta), and cos(phi) is never
+// negative -- so any wedge whose entire theta span is back-facing is
+// skipped, leaving only the actual visible hemisphere to paint.
 function drawAmigaChecker(ctx, r, phaseRad) {
   var latBands = 10
   var lonBands = 20
   var lonStep = Math.PI * 2 / lonBands
+  var meridianSamples = 4 // segments per left/right edge; plenty smooth at this band size
 
+  var latAngles = []
   var latBoundaries = []
   for (var i = 0; i <= latBands; i++) {
     var lat = -Math.PI / 2 + (i / latBands) * Math.PI
+    latAngles.push(lat)
     latBoundaries.push(r * Math.sin(lat))
   }
 
   for (var bi = 0; bi < latBands; bi++) {
     var yTop = latBoundaries[bi]
     var bandHeight = latBoundaries[bi + 1] - yTop
+    var phiLo = latAngles[bi]
+    var phiHi = latAngles[bi + 1]
     // Shading follows how face-on this band is (bands near the equator sit
     // flatter toward the viewer than the compressed ones near the poles),
     // echoing the diffuse falloff a real lit sphere would show.
@@ -129,6 +150,18 @@ function drawAmigaChecker(ctx, r, phaseRad) {
     var shade = 0.62 + 0.38 * Math.cos(midLat)
 
     for (var wj = 0; wj < lonBands; wj++) {
+      var thetaLeft = phaseRad + wj * lonStep
+      var thetaRight = phaseRad + (wj + 1) * lonStep
+
+      // Skip wedges that are entirely back-facing (hidden behind the visible
+      // hemisphere). A wedge straddling the front/back boundary is kept --
+      // its outer edge sits right at the silhouette either way, so drawing
+      // it from "the wrong side" is visually indistinguishable there.
+      if (Math.cos(thetaLeft) < 0 && Math.cos(thetaRight) < 0) continue
+
+      var ampLeft = r * Math.sin(thetaLeft)
+      var ampRight = r * Math.sin(thetaRight)
+
       ctx.save()
       ctx.beginPath()
       ctx.arc(0, 0, r, 0, Math.PI * 2)
@@ -137,8 +170,17 @@ function drawAmigaChecker(ctx, r, phaseRad) {
       ctx.rect(-r, yTop, 2 * r, bandHeight)
       ctx.clip()
       ctx.beginPath()
-      ctx.moveTo(0, 0)
-      ctx.arc(0, 0, r * 1.5, phaseRad + wj * lonStep, phaseRad + (wj + 1) * lonStep)
+      for (var s = 0; s <= meridianSamples; s++) {
+        var phi = phiLo + (s / meridianSamples) * (phiHi - phiLo)
+        var x = ampLeft * Math.cos(phi)
+        var y = r * Math.sin(phi)
+        if (s === 0) ctx.moveTo(x, y)
+        else ctx.lineTo(x, y)
+      }
+      for (var t = meridianSamples; t >= 0; t--) {
+        var phi2 = phiLo + (t / meridianSamples) * (phiHi - phiLo)
+        ctx.lineTo(ampRight * Math.cos(phi2), r * Math.sin(phi2))
+      }
       ctx.closePath()
       ctx.clip()
       var white = (bi + wj) % 2 === 0

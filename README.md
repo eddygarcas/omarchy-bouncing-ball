@@ -52,15 +52,21 @@ whether the settings panel is open.
 - **Settings don't persist** across `omarchy restart shell` — resets to
   Amiga / Medium / Normal / Classic bounce each time. In-memory only, no
   config file, since this is a toy rather than something worth persisting.
-- **The Amiga checker isn't a pixel-exact sphere projection.** Latitude
-  bands are spaced by `r*sin(latitude)` so they genuinely compress near the
-  top/bottom like a real sphere's foreshortening, and the longitude wedges
-  rotate with the ball so the pattern stays fixed to its surface as it
-  spins. But the wedges are pie slices from the center, which converge to a
-  point rather than following true projected meridian curves — so the
-  middle bands read more "pinwheel" than "grid." A fully accurate version is
-  possible with more involved vector math (projected meridian arcs instead
-  of straight radii); not attempted yet.
+- **The Amiga checker isn't a pixel-exact sphere projection**, but it's
+  close. Latitude bands are spaced by `r*sin(latitude)` so they genuinely
+  compress near the top/bottom like a real sphere's foreshortening, and each
+  wedge's left/right edges are sampled along the actual projected meridian
+  ellipse (`x = r*sin(theta)*cos(phi)`, `y = r*sin(phi)`) instead of
+  straight radii to the center, so the checker pattern reads as a wrapped
+  sphere rather than a pinwheel. Wedges whose entire longitude span faces
+  away from the viewer (`cos(theta) < 0`) are culled before drawing --
+  without that, front and back wedges land on the exact same screen pixels
+  under orthographic projection, and painter's-order overdraw made the two
+  halves of the ball appear to spin in opposite directions as `phase`
+  advanced. The remaining inexactness is just the sampling: each meridian
+  edge is approximated with a handful of line segments rather than a true
+  curve, which is visually indistinguishable at the current band count but
+  would show as faceting if `latBands`/`meridianSamples` were lowered a lot.
 - **Do not reintroduce per-pixel canvas rendering for the Amiga texture.**
   An earlier version used `createImageData`/`putImageData` to reconstruct
   each pixel's 3D position for a mathematically exact sphere projection. It
@@ -68,9 +74,10 @@ whether the settings panel is open.
   15-25 seconds of continuous repainting -- confirmed via CPU-monitored soak
   tests, independent of texture resolution, throttling, or the input-region
   mask. The current implementation avoids that path entirely, drawing only
-  with `arc`/`clip`/`fillRect` (the same primitives used everywhere else in
-  this plugin, soak-tested clean at 45+ seconds continuous with flat CPU).
-  If you improve the sphere accuracy, keep it on that side of the line.
+  with vector primitives (`arc`/`clip`/`fillRect`/`moveTo`/`lineTo`, the
+  same kind used everywhere else in this plugin, soak-tested clean at 45+
+  seconds continuous with flat CPU). If you improve the sphere accuracy,
+  keep it on that side of the line.
 
 ## Permissions & dependencies
 
