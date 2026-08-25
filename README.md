@@ -21,6 +21,17 @@ omarchy-shell shell rescanPlugins
 omarchy plugin enable eduard.bouncing-ball
 ```
 
+## Remove
+
+```
+omarchy plugin remove eduard.bouncing-ball
+```
+
+This deletes `~/.config/omarchy/plugins/eduard.bouncing-ball/` and removes
+the widget from your bar layout. There's nothing else to clean up: settings
+are in-memory only (see below), and the plugin writes no files and starts no
+external processes.
+
 ## What it does
 
 Click the bar icon (a plain circle) to open the panel:
