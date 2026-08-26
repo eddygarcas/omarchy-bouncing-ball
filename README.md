@@ -8,6 +8,8 @@ back into the air. It doubles as a "keep awake" tool: an optional mode
 bounces the ball as a visible reminder while blocking your screen from
 locking, sleeping, or dimming, for a duration you set with a slider.
 
+![Bouncing Ball settings panel, showing Style, Size, Speed, and Physics options including Zero-G Orbit](screenshot.png)
+
 ## Install
 
 ```
@@ -31,8 +33,11 @@ omarchy plugin remove eduard.bouncing-ball
 
 This deletes `~/.config/omarchy/plugins/eduard.bouncing-ball/` and removes
 the widget from your bar layout. There's nothing else to clean up: settings
-are in-memory only (see below), and the plugin writes no files and starts no
-external processes.
+are in-memory only (see below) and the plugin writes no files -- the only
+external processes it ever starts are short-lived (`omarchy-menu-images`
+when picking an Image-style photo, `hyprctl` while Zero-G Orbit is active;
+see Permissions & dependencies below), and none of them persist past this
+removal.
 
 ## What it does
 
