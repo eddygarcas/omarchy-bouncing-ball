@@ -262,21 +262,45 @@ function drawAmigaChecker(ctx, r, phaseRad) {
 // not to this mapping.
 // Each cell clips to a plain rect (the circle plus the cell's own bled
 // bounding box), not the true curved meridian polygon clipSphereCell/
-// drawAmigaChecker use. QtQuick's Canvas silently drops a drawImage call
-// once the active clip is that full circle+rect+polygon stack -- confirmed
-// empirically by process of elimination: the identical stack with fillRect
-// (drawAmigaChecker) never drops a paint; widening the thin destination
-// spans that occur near the silhouette didn't help at any size tried,
-// ruling out "the destination rect is too thin"; a createPattern+fillRect
-// swap-in for drawImage rendered nothing at all (pattern fills aren't
-// supported here); and progressively simplifying the clip -- circle alone,
-// then circle+rect -- made the missing cells reappear right as the
-// meridian polygon was dropped, and stayed gone once it was. A
-// straight-edged rect cell is the trade for working around that: still
-// correctly positioned, sized, and foreshortened (dx/dw and yTop/
-// bandHeight are unchanged from the polygon version), just without the
-// slight curve each cell's left/right edge would otherwise have --
-// invisible at this cell count in practice.
+// drawAmigaChecker use -- and that rect (and drawImage's own dest rect,
+// kept identical to it) is never allowed to go below `minDestSpan` on
+// either axis. Both pieces turned out to matter independently: QtQuick's
+// Canvas silently drops a drawImage call under the full circle+rect+
+// polygon clip stack (the identical stack with fillRect, as
+// drawAmigaChecker uses, never drops a paint -- confirmed live across many
+// rotation phases), which is what motivated dropping the polygon down to a
+// rect in the first place. But a live screenshot afterward still showed a
+// gap, live-reproduced with the exact same setup: dropping the polygon
+// wasn't sufficient on its own, because a sufficiently narrow *rectangular*
+// clip can trigger the identical drop -- something an earlier isolation
+// test missed, since it happened to use a full-width rect (never narrow)
+// rather than the cell's own tight bounding box. widenThinSpan (below)
+// keeps the source/dest scale factor fixed while widening a too-thin span
+// on the destination side and clamping the correspondingly widened source
+// span to the image's bounds, so neither the clip rect nor drawImage's own
+// dest rect are ever pathologically thin. Verified live, repeatedly, with
+// the exact original reproduction (amiga_ball.jpg, gravity mode, size 300,
+// settled) and multiple fast-rotation phases -- not just re-run against
+// the earlier (insufficient) pycairo/Node harnesses, since this bug lives
+// in QtQuick's own Canvas implementation and neither of those exercises it.
+function widenThinSpan(srcStart, srcSpan, destStart, destSpan, minDestSpan, srcExtent) {
+  if (destSpan >= minDestSpan) {
+    return { srcStart: srcStart, srcSpan: srcSpan, destStart: destStart, destSpan: destSpan }
+  }
+  var scale = srcSpan / destSpan
+  var newDestSpan = minDestSpan
+  var newSrcSpan = Math.min(srcExtent, scale * newDestSpan)
+  var destMid = destStart + destSpan / 2
+  var srcMid = srcStart + srcSpan / 2
+  var newSrcStart = Math.max(0, Math.min(srcExtent - newSrcSpan, srcMid - newSrcSpan / 2))
+  return {
+    srcStart: newSrcStart,
+    srcSpan: newSrcSpan,
+    destStart: destMid - newDestSpan / 2,
+    destSpan: newDestSpan
+  }
+}
+
 function drawImageSphere(ctx, r, phaseRad, image, imgWidth, imgHeight) {
   var latBands = 10
   var lonBands = 20
@@ -310,16 +334,19 @@ function drawImageSphere(ctx, r, phaseRad, image, imgWidth, imgHeight) {
       var dx = Math.min(cell.ampLeft, cell.ampRight)
       var dw = Math.max(0.5, Math.abs(cell.ampRight - cell.ampLeft))
 
-      // Plain rect clip, not clipSphereCell's polygon -- see the function
-      // docblock above for why.
+      // Widens both the clip rect and drawImage's own dest rect together
+      // (never just one) -- see widenThinSpan and the function docblock.
+      var hSpan = widenThinSpan(sx, sw, dx, dw, 6, imgWidth)
+      var vSpan = widenThinSpan(sy, sh, cell.yTop, cell.bandHeight, 6, imgHeight)
+
       ctx.save()
       ctx.beginPath()
       ctx.arc(0, 0, r, 0, Math.PI * 2)
       ctx.clip()
       ctx.beginPath()
-      ctx.rect(dx, cell.yTop, dw, cell.bandHeight)
+      ctx.rect(hSpan.destStart, vSpan.destStart, hSpan.destSpan, vSpan.destSpan)
       ctx.clip()
-      ctx.drawImage(image, sx, sy, sw, sh, dx, cell.yTop, dw, cell.bandHeight)
+      ctx.drawImage(image, hSpan.srcStart, vSpan.srcStart, hSpan.srcSpan, vSpan.srcSpan, hSpan.destStart, vSpan.destStart, hSpan.destSpan, vSpan.destSpan)
       ctx.restore()
     }
   }

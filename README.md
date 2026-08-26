@@ -143,22 +143,27 @@ and nothing persists once it's off.
   and radial shading, not the mapping, were the actual source of the
   mess), and the fallback wasn't worth losing full coverage over.
 - **The Image style's cells have straight left/right edges, not the true
-  curved meridian edges the Amiga checker's cells have.** QtQuick's Canvas
-  silently drops a `drawImage` call once the active clip is the full
-  circle+rect+meridian-polygon stack `clipSphereCell` builds -- confirmed
-  empirically by process of elimination: the identical clip stack with
-  `fillRect` (what the checker style uses) never drops a paint; forcing
-  a larger destination rect didn't help at any size tried, ruling out "the
-  destination is too thin"; a `createPattern`+`fillRect` swap-in for
-  `drawImage` rendered nothing at all (pattern fills aren't supported
-  here); and progressively simplifying the clip -- circle alone, then
-  circle+rect -- made the missing cells reappear right as the meridian
-  polygon was dropped, and stayed gone once it was. So the Image style
-  clips to a plain rect (circle + the cell's own bounding box) instead:
-  still correctly positioned, sized, and foreshortened, just with a flat
-  edge where the polygon version would have a slight curve -- invisible at
-  the current cell count in practice, and a much better trade than the
-  gaps a bugged `drawImage` call left in their place.
+  curved meridian edges the Amiga checker's cells have, and every cell's
+  clip/destination rect has a 6px floor on each axis.** QtQuick's Canvas
+  silently drops a `drawImage` call under a clip/dest rect it considers too
+  thin -- confirmed live, repeatedly, by process of elimination. The
+  identical clip stack with `fillRect` (what the checker style uses) never
+  drops a paint; a `createPattern`+`fillRect` swap-in for `drawImage`
+  rendered nothing at all (pattern fills aren't supported here); and
+  dropping `clipSphereCell`'s meridian polygon down to a plain rect made
+  the gaps mostly disappear, but not entirely -- a live screenshot still
+  caught one. That's because an early isolation test happened to use a
+  full-width rect (never narrow) rather than the cell's own tight bounding
+  box, so it never actually exercised a narrow *rectangular* clip with
+  `drawImage` -- the real trigger turned out to be thinness itself, not the
+  polygon shape specifically. The fix widens both the clip rect and
+  `drawImage`'s own destination rect together (never just one) to at least
+  6px per axis, holding the source/destination scale factor fixed and
+  clamping the correspondingly widened source span to the image's bounds.
+  Net effect versus the true curved-meridian version: cells have a flat
+  edge instead of a very slight curve, invisible at the current cell count,
+  and a much better trade than the gaps a dropped `drawImage` call left in
+  their place.
 
 ## Permissions & dependencies
 
