@@ -224,13 +224,14 @@ function drawAmigaChecker(ctx, r, phaseRad) {
   }
 }
 
-// Wraps a user-picked image around the WHOLE ball with a fisheye/
-// orthographic mapping, not an equirectangular one. An equirectangular wrap
-// (linear-in-longitude, the same flat layout as a world map) was the first
-// approach here, but it slices an ordinary photo into ~20 disconnected
-// vertical ribbons, because a normal photo's columns aren't meant to
-// represent continuously adjacent longitudes the way an actual world map's
-// are -- it read as sliced up rather than wrapped around a sphere.
+// Wraps a user-picked image around ONE HEMISPHERE of the ball with a
+// fisheye/orthographic mapping, not an equirectangular one. An
+// equirectangular wrap (linear-in-longitude, the same flat layout as a
+// world map) was the first approach here, but it slices an ordinary photo
+// into ~20 disconnected vertical ribbons, because a normal photo's columns
+// aren't meant to represent continuously adjacent longitudes the way an
+// actual world map's are -- it read as sliced up rather than wrapped
+// around a sphere.
 //
 // Both source axes here use `amp = r*sin(angle)` -- the same linear-disc
 // spacing the destination geometry already uses for both the checker and
@@ -240,49 +241,32 @@ function drawAmigaChecker(ctx, r, phaseRad) {
 // Horizontal position uses each wedge's INTRINSIC longitude (`wj*lonStep`,
 // not `phaseRad + wj*lonStep`) so a given patch of the image stays glued to
 // the same patch of the ball's surface as it spins -- like a sticker glued
-// all the way around a rotating globe -- instead of the image scrolling
-// sideways underneath the wedges as `phaseRad` advances.
+// to a rotating globe -- instead of the image scrolling sideways underneath
+// the wedges as `phaseRad` advances.
 //
-// `sin` isn't globally monotonic over a full turn: it rises from -r to +r
-// across the front quarter-turns (-90 to 90 degrees) and *mirrors* back
-// down from +r to -r across the back ones (90 to 270). That's not a bug to
-// route around -- it's what makes a single flat image wrap a full sphere at
-// all without a texture that was authored as a 360-degree panorama: the
-// front hemisphere shows the image right-way-round, the back hemisphere
-// shows it mirrored, and the two meet exactly at the image's own left/right
-// edges (amp = +-r) at the seams, so there's no jump, only a fold-line where
-// the mirroring itself is the point (the same trick behind any sphere
-// texture built from a single non-panoramic photo). Verified with a
-// synthetic numbered rainbow-stripe test image rendered head-on via pycairo
-// (independent of any live-desktop screenshot): every tested rotation phase
-// showed either a clean monotonic run or a clean symmetric mirror at the
-// seam, never a broken/jagged discontinuity. A visually busy result on a
-// photo that is itself a photo of a sphere (checkerboard ball, global
-// backgrounds) traces back to that photo's own margins and radial shading,
-// not to this mapping.
-// Each cell clips to a plain rect (the circle plus the cell's own bled
-// bounding box), not the true curved meridian polygon clipSphereCell/
-// drawAmigaChecker use -- and that rect (and drawImage's own dest rect,
-// kept identical to it) is never allowed to go below `minDestSpan` on
-// either axis. Both pieces turned out to matter independently: QtQuick's
-// Canvas silently drops a drawImage call under the full circle+rect+
-// polygon clip stack (the identical stack with fillRect, as
-// drawAmigaChecker uses, never drops a paint -- confirmed live across many
-// rotation phases), which is what motivated dropping the polygon down to a
-// rect in the first place. But a live screenshot afterward still showed a
-// gap, live-reproduced with the exact same setup: dropping the polygon
-// wasn't sufficient on its own, because a sufficiently narrow *rectangular*
-// clip can trigger the identical drop -- something an earlier isolation
-// test missed, since it happened to use a full-width rect (never narrow)
-// rather than the cell's own tight bounding box. widenThinSpan (below)
-// keeps the source/dest scale factor fixed while widening a too-thin span
-// on the destination side and clamping the correspondingly widened source
-// span to the image's bounds, so neither the clip rect nor drawImage's own
-// dest rect are ever pathologically thin. Verified live, repeatedly, with
-// the exact original reproduction (amiga_ball.jpg, gravity mode, size 300,
-// settled) and multiple fast-rotation phases -- not just re-run against
-// the earlier (insufficient) pycairo/Node harnesses, since this bug lives
-// in QtQuick's own Canvas implementation and neither of those exercises it.
+// Only ONE hemisphere gets the image (`isImageDecalWedge`, below); the
+// other falls back to the plain `color` fill via `fillRect`. Not for
+// geometric reasons -- `sin` mirrors cleanly across the back hemisphere
+// (verified with a synthetic striped test image; a full-sphere version
+// with no fallback did once ship, see git history) -- but for reliability.
+// QtQuick's Canvas has repeatedly turned out to silently drop a
+// `drawImage` call under conditions this file could only pin down by
+// elimination, one narrower live reproduction at a time (full clip stack
+// too complex -> simplified to a plain rect; that rect too thin ->
+// widened via `widenThinSpan`, below) -- and each fix looked clean in
+// testing here, then still showed a live gap once actually used. `fillRect`
+// (what `drawAmigaChecker` uses) has never dropped a paint in any test
+// through this whole process, however narrow or however many per frame.
+// Limiting `drawImage` to half the cells trades full-sphere image coverage
+// for cutting the number of `drawImage` calls -- and therefore the
+// exposure to whatever about this bug still isn't fully understood -- in
+// half. If a gap ever turns up even here, the next step is dropping
+// `drawImage` for this style entirely, not narrowing the surviving half
+// further.
+function isImageDecalWedge(wj, lonStep) {
+  return Math.cos((wj + 0.5) * lonStep) > 0
+}
+
 function widenThinSpan(srcStart, srcSpan, destStart, destSpan, minDestSpan, srcExtent) {
   if (destSpan >= minDestSpan) {
     return { srcStart: srcStart, srcSpan: srcSpan, destStart: destStart, destSpan: destSpan }
@@ -301,7 +285,7 @@ function widenThinSpan(srcStart, srcSpan, destStart, destSpan, minDestSpan, srcE
   }
 }
 
-function drawImageSphere(ctx, r, phaseRad, image, imgWidth, imgHeight) {
+function drawImageSphere(ctx, r, phaseRad, image, imgWidth, imgHeight, color) {
   var latBands = 10
   var lonBands = 20
   var lonStep = Math.PI * 2 / lonBands
@@ -320,33 +304,51 @@ function drawImageSphere(ctx, r, phaseRad, image, imgWidth, imgHeight) {
       var thetaRight = phaseRad + (wj + 1) * lonStep
       if (sphereCellIsBackFacing(thetaLeft, thetaRight)) continue
 
-      var ampTexLeft = r * Math.sin(wj * lonStep)
-      var ampTexRight = r * Math.sin((wj + 1) * lonStep)
-      var sx = (Math.min(ampTexLeft, ampTexRight) + r) / (2 * r) * imgWidth
-      var sw = Math.max(0.5, Math.abs(ampTexRight - ampTexLeft) / (2 * r) * imgWidth)
-
       // The destination rect is deliberately built from the same bled
       // (slightly overlapped) boundary as the clip, not the cell's true
-      // span -- drawImage only paints within its own dest rect regardless
-      // of how big the clip is, so a bled clip with a tight dest rect would
-      // still leave the seam.
+      // span -- drawImage/fillRect only paint within their own dest rect
+      // regardless of how big the clip is, so a bled clip with a tight
+      // dest rect would still leave the seam.
       var cell = bleedSphereCell(r, phiLo, phiHi, thetaLeft, thetaRight, lonStep)
       var dx = Math.min(cell.ampLeft, cell.ampRight)
       var dw = Math.max(0.5, Math.abs(cell.ampRight - cell.ampLeft))
-
-      // Widens both the clip rect and drawImage's own dest rect together
-      // (never just one) -- see widenThinSpan and the function docblock.
-      var hSpan = widenThinSpan(sx, sw, dx, dw, 6, imgWidth)
-      var vSpan = widenThinSpan(sy, sh, cell.yTop, cell.bandHeight, 6, imgHeight)
 
       ctx.save()
       ctx.beginPath()
       ctx.arc(0, 0, r, 0, Math.PI * 2)
       ctx.clip()
-      ctx.beginPath()
-      ctx.rect(hSpan.destStart, vSpan.destStart, hSpan.destSpan, vSpan.destSpan)
-      ctx.clip()
-      ctx.drawImage(image, hSpan.srcStart, vSpan.srcStart, hSpan.srcSpan, vSpan.srcSpan, hSpan.destStart, vSpan.destStart, hSpan.destSpan, vSpan.destSpan)
+
+      if (isImageDecalWedge(wj, lonStep)) {
+        var ampTexLeft = r * Math.sin(wj * lonStep)
+        var ampTexRight = r * Math.sin((wj + 1) * lonStep)
+        var sx = (Math.min(ampTexLeft, ampTexRight) + r) / (2 * r) * imgWidth
+        var sw = Math.max(0.5, Math.abs(ampTexRight - ampTexLeft) / (2 * r) * imgWidth)
+
+        // Widens both the clip rect and drawImage's own dest rect together
+        // (never just one) -- see widenThinSpan and the function docblock.
+        var hSpan = widenThinSpan(sx, sw, dx, dw, 6, imgWidth)
+        var vSpan = widenThinSpan(sy, sh, cell.yTop, cell.bandHeight, 6, imgHeight)
+
+        ctx.beginPath()
+        ctx.rect(hSpan.destStart, vSpan.destStart, hSpan.destSpan, vSpan.destSpan)
+        ctx.clip()
+        ctx.drawImage(image, hSpan.srcStart, vSpan.srcStart, hSpan.srcSpan, vSpan.srcSpan, hSpan.destStart, vSpan.destStart, hSpan.destSpan, vSpan.destSpan)
+      } else {
+        // Must clip to this cell's own rect before filling -- unlike the
+        // checker style (whose caller already clipped to the true cell
+        // shape before ever reaching a fillRect call), nothing upstream of
+        // this branch has narrowed the clip past the outer circle yet.
+        // Filling `-r,-r,2r,2r` without this rect clip first doesn't just
+        // draw an oversized cell -- painted after an image cell earlier in
+        // the same wj loop, it repaints the ENTIRE ball solid, erasing
+        // every image cell drawn so far.
+        ctx.beginPath()
+        ctx.rect(dx, cell.yTop, dw, cell.bandHeight)
+        ctx.clip()
+        ctx.fillStyle = color
+        ctx.fillRect(-r, -r, 2 * r, 2 * r)
+      }
+
       ctx.restore()
     }
   }
@@ -370,7 +372,7 @@ function drawBall(ctx, size, style, color, phaseDeg, image, imgWidth, imgHeight)
   } else if (style === "image" && image && imgWidth > 0 && imgHeight > 0) {
     ctx.save()
     ctx.translate(r, r)
-    drawImageSphere(ctx, r, (phaseDeg || 0) * Math.PI / 180, image, imgWidth, imgHeight)
+    drawImageSphere(ctx, r, (phaseDeg || 0) * Math.PI / 180, image, imgWidth, imgHeight, color)
     ctx.restore()
   } else {
     ctx.save()

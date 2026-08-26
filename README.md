@@ -116,54 +116,59 @@ and nothing persists once it's off.
   no RSS growth over a minute of continuous Image-style repainting. If you
   improve the sphere accuracy, keep it on that side of the line.
 - **The Image style uses a fisheye/orthographic mapping, not an
-  equirectangular one.** An equirectangular wrap (the same flat layout as a
-  world map) was the first approach, but it assumes the source image
-  already reads as that kind of map -- an ordinary photo doesn't, so it got
-  sliced into ~20 disconnected vertical ribbons instead of reading as
-  wrapped around a sphere. The current approach instead treats the image as
-  a flat circular photo glued to the ball's surface: both source axes use
-  `amp = r*sin(angle)` (the same linear-disc spacing the destination
-  geometry and the checker style already use) rather than the angle itself,
-  so the image compresses toward the limb the way the sphere's own
-  foreshortening already does, and a given patch of the image stays glued
-  to the same patch of the ball's surface as it spins (using each cell's
-  *intrinsic* longitude, not the rotated one) instead of scrolling
-  sideways underneath the wedges. The image covers the whole ball, not
-  just one hemisphere: `sin` isn't globally monotonic over a full turn
-  (it rises across the front quarter-turns and mirrors back down across
-  the back ones), so the back hemisphere shows the image mirrored rather
-  than a second, independent copy -- the two meet exactly at the image's
-  own left/right edges, with no jump. An earlier version limited the
-  image to only the front hemisphere (falling back to a plain `color`
-  fill on the back) specifically to dodge that mirroring; dropped after
-  a synthetic striped test image and a standalone pycairo render
-  (independent of any live-desktop screenshot) showed the "fold" that
-  motivated the split was actually this same clean, expected mirror --
-  it only read as broken on a *photo of a sphere itself* (its own margins
-  and radial shading, not the mapping, were the actual source of the
-  mess), and the fallback wasn't worth losing full coverage over.
-- **The Image style's cells have straight left/right edges, not the true
-  curved meridian edges the Amiga checker's cells have, and every cell's
-  clip/destination rect has a 6px floor on each axis.** QtQuick's Canvas
-  silently drops a `drawImage` call under a clip/dest rect it considers too
-  thin -- confirmed live, repeatedly, by process of elimination. The
-  identical clip stack with `fillRect` (what the checker style uses) never
-  drops a paint; a `createPattern`+`fillRect` swap-in for `drawImage`
-  rendered nothing at all (pattern fills aren't supported here); and
-  dropping `clipSphereCell`'s meridian polygon down to a plain rect made
-  the gaps mostly disappear, but not entirely -- a live screenshot still
-  caught one. That's because an early isolation test happened to use a
-  full-width rect (never narrow) rather than the cell's own tight bounding
-  box, so it never actually exercised a narrow *rectangular* clip with
-  `drawImage` -- the real trigger turned out to be thinness itself, not the
-  polygon shape specifically. The fix widens both the clip rect and
-  `drawImage`'s own destination rect together (never just one) to at least
-  6px per axis, holding the source/destination scale factor fixed and
-  clamping the correspondingly widened source span to the image's bounds.
-  Net effect versus the true curved-meridian version: cells have a flat
-  edge instead of a very slight curve, invisible at the current cell count,
-  and a much better trade than the gaps a dropped `drawImage` call left in
-  their place.
+  equirectangular one, and only covers one hemisphere.** An equirectangular
+  wrap (the same flat layout as a world map) was the first approach, but it
+  assumes the source image already reads as that kind of map -- an ordinary
+  photo doesn't, so it got sliced into ~20 disconnected vertical ribbons
+  instead of reading as wrapped around a sphere. The current approach
+  instead treats the image as a flat circular photo glued to the ball's
+  surface: both source axes use `amp = r*sin(angle)` (the same linear-disc
+  spacing the destination geometry and the checker style already use)
+  rather than the angle itself, so the image compresses toward the limb the
+  way the sphere's own foreshortening already does, and a given patch of
+  the image stays glued to the same patch of the ball's surface as it spins
+  (using each cell's *intrinsic* longitude, not the rotated one) instead of
+  scrolling sideways underneath the wedges. Only cells on the hemisphere
+  where that mapping is monotonic get the image (`isImageDecalWedge`); the
+  rest fall back to the plain `color` fill `solid` already uses. A
+  full-sphere version (image mirrored on the back hemisphere) was tried and
+  is mathematically sound -- verified with a synthetic striped test image
+  and a standalone pycairo render -- but was abandoned for a `drawImage`
+  reliability issue documented in the next point, not for a mapping reason.
+- **`drawImage` has repeatedly, silently dropped paints under QtQuick's
+  Canvas, for reasons this file could only chase down empirically, one
+  live reproduction at a time -- so the Image style keeps its `drawImage`
+  usage as small and simple as it can.** In order: the original full
+  circle+rect+meridian-polygon clip stack (`clipSphereCell`, what the
+  checker style also uses via `fillRect`, which has never dropped a paint
+  in any test here) turned out to make `drawImage` drop cells; simplifying
+  that down to a plain rect helped but didn't fully fix it, because a
+  sufficiently narrow *rectangular* clip triggers the identical drop (an
+  earlier isolation test missed this because it happened to use a
+  full-width rect, never a narrow one); `widenThinSpan` fixed that by
+  flooring both the clip rect and `drawImage`'s own destination rect to at
+  least 6px per axis together (never just one), holding the source/
+  destination scale fixed and clamping the correspondingly widened source
+  span to the image's bounds. Limiting `drawImage` to one hemisphere
+  (previous point) is the last piece: not a fix for this bug, but cutting
+  the number of `drawImage` calls per frame in half cuts the exposure to
+  whatever about it still isn't fully understood. Net effect versus a
+  hypothetical fully-correct version: cells have a flat edge instead of a
+  very slight curve, and only one hemisphere shows the image -- both
+  invisible/minor trade-offs next to the gaps a dropped `drawImage` call
+  left in their place. **A real, unrelated bug found and fixed along the
+  way:** the `color`-fill fallback for non-decal cells originally filled
+  the *entire ball* (`fillRect(-r, -r, 2*r, 2*r)`) rather than clipping to
+  its own cell first -- harmless-looking on its own, since the clip
+  requirement isn't obvious from a solid-color fill, but painted *after* an
+  image cell earlier in the same per-frame loop, it silently erased that
+  image cell (and everything else drawn so far) each time, which is what
+  made most of the image hemisphere disappear behind solid color. Caught
+  by rendering the exact algorithm standalone with each branch mapped to a
+  flat debug color (blue for image cells, red for solid) instead of the
+  real image and clip logic -- the debug render immediately showed far
+  more red than the geometry implied it should, which fillRect/`drawImage`
+  screenshots alone hadn't made obvious.
 
 ## Permissions & dependencies
 
