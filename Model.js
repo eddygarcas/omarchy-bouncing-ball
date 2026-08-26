@@ -22,7 +22,8 @@ var stylePresets = [
 var physicsPresets = [
   { label: "Classic bounce", value: "classic" },
   { label: "Gravity drop", value: "gravity" },
-  { label: "Landing", value: "landing" }
+  { label: "Landing", value: "landing" },
+  { label: "Zero-G Orbit", value: "orbit" }
 ]
 
 // Scaled proportionally from real surface gravity (Earth 9.81 m/s^2) onto
@@ -75,10 +76,30 @@ function randomVelocity(speed) {
 }
 
 // Advances the physics state by dt seconds. `state` is a plain object with
-// x, y, vx, vy, size, mode ("classic"|"gravity"|"landing"), width, height
-// (viewport), gravity (px/s^2, only read for "gravity"/"landing", defaults
-// to Earth's 900 if omitted). "landing" additionally reads thrustUp/thrustLeft/thrustRight
-// (booleans, held-key state -- see Overlay.qml's keyboard handling) and
+// x, y, vx, vy, size, mode ("classic"|"gravity"|"landing"|"orbit"), width,
+// height (viewport), gravity (px/s^2, only read for "gravity"/"landing"/
+// "orbit", defaults to Earth's 900 if omitted). "orbit" additionally reads
+// attractorX/attractorY (the point it orbits -- the live mouse cursor
+// position, see Service.qml/Overlay.qml) and applies a genuine inverse-
+// square attraction toward it rather than a constant downward pull: accel
+// = gravity * orbitRefRadius^2 / r^2, directed at the attractor, where r is
+// the distance from the ball's CENTER (not its x/y corner) to the
+// attractor. `gravity` is reused as-is from the other modes' slider/
+// presets, redefined here as "the acceleration at orbitRefRadius" so
+// picking Earth over Moon still reads as "stronger pull", but the force
+// falls off with the square of distance like a real orbit instead of
+// staying constant -- close passes near the attractor slingshot hard, far
+// ones barely curve at all. r is floored at the ball's own radius (a
+// standard N-body "softening" term) so passing near-dead-center over the
+// cursor can't produce an unbounded/divergent acceleration; nothing else
+// about this mode treats reaching the attractor as a collision or a
+// win/lose state the way Landing's floor does -- it just slingshots
+// through. Screen edges still bounce plainly (this mode never hits the
+// "landing"/"gravity" branches below), so an escaping orbit bounces around
+// rather than flying off forever.
+//
+// "landing" additionally reads thrustUp/thrustLeft/thrustRight (booleans,
+// held-key state -- see Overlay.qml's keyboard handling) and
 // landingResult (""|"success"|"crash", persisted across calls by the
 // caller). Mutates and returns it so callers can assign properties back in
 // one pass.
@@ -108,8 +129,20 @@ function step(state, dt) {
   var thrustPower = 1700
   var lateralThrustPower = 650
   var landingSpeedThreshold = 140
+  var orbitRefRadius = 220
 
   if (s.mode === "gravity" || s.mode === "landing") s.vy += gravity * dt
+
+  if (s.mode === "orbit") {
+    var cx = s.x + s.size / 2
+    var cy = s.y + s.size / 2
+    var dx = s.attractorX - cx
+    var dy = s.attractorY - cy
+    var r = Math.max(s.size / 2, Math.hypot(dx, dy))
+    var accel = gravity * orbitRefRadius * orbitRefRadius / (r * r)
+    s.vx += accel * (dx / r) * dt
+    s.vy += accel * (dy / r) * dt
+  }
 
   if (s.mode === "landing") {
     if (s.thrustUp) s.vy -= thrustPower * dt

@@ -57,16 +57,23 @@ Click the bar icon (a soccer ball) to open the panel:
   **Landing is the one physics mode that reads keyboard input** — click
   the ball once to give it keyboard control (the same click also boops
   it), then **↑ / ← / →** fly it; click anywhere else and it lets go
-  again, same as clicking into a different app window would.
+  again, same as clicking into a different app window would), or Zero-G
+  Orbit (no floor, no falling — the ball orbits your live mouse cursor
+  instead, pulled by a real inverse-square gravity well centered on it.
+  Move your mouse and the well moves with it; a close pass slingshots the
+  ball hard, a distant one barely curves its path, same as an actual
+  two-body orbit).
 - **Gravity** — a slider (50–2000 px/s²) for free adjustment, plus Moon /
   Mars / Earth preset buttons that jump straight to real-world-scaled
   values and light up whenever the slider happens to land exactly on one.
-  Only shown while Gravity drop or Landing is selected (Classic bounce
-  ignores gravity entirely). Earth (900 px/s²) is the same strength Gravity
-  drop and Landing always used; Moon (150) and Mars (340) are scaled down
-  proportionally to their real surface gravity, so Landing under Moon
-  gravity gives you a much longer, more forgiving descent to practice a
-  soft touchdown than Earth does.
+  Only shown while Gravity drop, Landing, or Zero-G Orbit is selected
+  (Classic bounce ignores gravity entirely). Earth (900 px/s²) is the same
+  strength Gravity drop and Landing always used; Moon (150) and Mars (340)
+  are scaled down proportionally to their real surface gravity, so Landing
+  under Moon gravity gives you a much longer, more forgiving descent to
+  practice a soft touchdown than Earth does. In Zero-G Orbit the same
+  number instead sets how strongly the cursor pulls: higher means a
+  tighter, faster orbit.
 - **Keep Awake** — a toggle plus a slider (0 to 3 hours, in 5-minute steps;
   0 means "until you turn it off"). Turning it on starts the ball bouncing
   if it isn't already and inhibits the system idle cycle for the chosen
@@ -234,10 +241,20 @@ and nothing persists once it's off.
 
 ## Permissions & dependencies
 
-- No external packages or network access required.
-- Runs entirely inside the shared `omarchy-shell` process via a background
+- No external packages or network access required -- everything used ships
+  with Omarchy itself.
+- Runs mostly inside the shared `omarchy-shell` process via a background
   service, a bar-widget settings panel, and a full-screen click-through
-  overlay -- no separate processes, no files written to disk.
+  overlay -- no files written to disk. The one exception is Zero-G Orbit
+  (see below), which spawns short-lived `hyprctl` subprocesses.
+- **Zero-G Orbit** needs the live global mouse position to orbit around,
+  but the overlay is deliberately click-through and so never holds pointer
+  focus -- it can't receive continuous Wayland mouse-move events the way a
+  normal focused window would. `hyprctl cursorpos` is the sanctioned way
+  to read the compositor's cursor position without grabbing it. Polled via
+  a real subprocess (`Quickshell.Io.Process`) at 30/s, well under the 60Hz
+  physics tick, and only while this mode is actually selected and
+  bouncing -- never while any other mode is active or the ball is stopped.
 - **Choose Image…** shells out to `omarchy-menu-images` (ships with
   Omarchy) pointed at `~/Pictures`, the same fullscreen picker used for
   wallpapers and themes, rather than this plugin reimplementing a file

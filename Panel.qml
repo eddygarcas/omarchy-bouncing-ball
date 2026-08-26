@@ -344,14 +344,14 @@ Panel {
             }
           }
 
-          // Only Gravity drop and Landing actually apply gravity -- see
+          // Gravity drop, Landing, and Zero-G Orbit all apply gravity -- see
           // Model.js's step(). The slider gives free control over the exact
           // value; the preset buttons below jump straight to Moon/Mars/Earth
           // and -- via the same `active` highlight every other preset row in
           // this panel already uses -- double as a check for whether the
           // slider is currently sitting exactly on one of them.
           Column {
-            visible: !!(root.svc && (root.svc.mode === "gravity" || root.svc.mode === "landing"))
+            visible: !!(root.svc && (root.svc.mode === "gravity" || root.svc.mode === "landing" || root.svc.mode === "orbit"))
             width: parent.width
             spacing: Style.space(6)
 
@@ -415,6 +415,16 @@ Panel {
             color: root.svc && root.svc.landingResult === "crash" ? "#e6392b"
               : root.svc && root.svc.landingResult === "success" ? "#16a085"
               : Qt.darker(root.bar.foreground, 1.4)
+            font.family: root.bar.fontFamily
+            font.pixelSize: Style.font.caption
+          }
+
+          Text {
+            visible: !!(root.svc && root.svc.mode === "orbit")
+            width: parent.width
+            wrapMode: Text.WordWrap
+            text: "The ball orbits your mouse cursor instead of falling -- move your mouse to relocate the pull. Higher Gravity below means a tighter, faster orbit; a close pass slingshots hard, same as a real gravity well."
+            color: Qt.darker(root.bar.foreground, 1.4)
             font.family: root.bar.fontFamily
             font.pixelSize: Style.font.caption
           }

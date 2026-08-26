@@ -106,10 +106,26 @@ Item {
 
     onWidthChanged: if (root.service) root.service.viewportWidth = width
     onHeightChanged: if (root.service) root.service.viewportHeight = height
+    // "orbit" mode only: hyprctl reports the cursor in Hyprland's GLOBAL
+    // (all-monitors) coordinate space, but everything else here (x, y,
+    // attractorX/Y) is local to this window's own output -- see the
+    // screenOffsetX/Y comment in Service.qml. `screen` isn't necessarily
+    // assigned yet at Component.onCompleted (confirmed live: it read back
+    // as still unset there), so this also re-syncs on `screenChanged` --
+    // whichever fires first with a real value wins; the window's own
+    // output doesn't change at runtime in practice, so no ongoing binding
+    // is needed beyond that.
+    onScreenChanged: syncScreenOffset()
     Component.onCompleted: {
       if (!root.service) return
       root.service.viewportWidth = width
       root.service.viewportHeight = height
+      syncScreenOffset()
+    }
+    function syncScreenOffset() {
+      if (!root.service || !window.screen) return
+      root.service.screenOffsetX = window.screen.x
+      root.service.screenOffsetY = window.screen.y
     }
 
     // Stand-in the input-region mask tracks instead of the fast-moving

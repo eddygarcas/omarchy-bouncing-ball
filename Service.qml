@@ -28,6 +28,55 @@ QtObject {
   property real viewportWidth: 1920
   property real viewportHeight: 1080
 
+  // "orbit" mode only: the live cursor position (in THIS window's own
+  // local/viewport space, not Hyprland's global one -- see screenOffsetX/Y
+  // below), the point it orbits -- see Model.js's step() docblock for the
+  // actual attraction math. The overlay is deliberately click-through (see
+  // the keyboard-focus block comment in Overlay.qml for why that matters),
+  // so it never holds pointer focus and can't get continuous Wayland
+  // mouse-move events outside its own tiny hitbox -- hyprctl's own IPC
+  // socket is the sanctioned way to read the compositor's live cursor
+  // position without grabbing it. Polled well under the 60Hz physics tick
+  // (30/s, decoupled like maskSyncTimer already is) since a subprocess
+  // spawn per tick would be wasteful; only runs at all while this mode is
+  // actually selected and bouncing.
+  property real cursorX: viewportWidth / 2
+  property real cursorY: viewportHeight / 2
+
+  // `hyprctl cursorpos` answers in Hyprland's GLOBAL (all-monitors)
+  // coordinate space, but x/y/viewportWidth/viewportHeight here are all
+  // local to whichever single output this overlay is anchored to -- on
+  // anything but a single monitor pinned at (0,0), the raw reply lands
+  // outside [0, viewportWidth]x[0, viewportHeight] and orbit mode would
+  // aim at a point that isn't even on screen. Set once by Overlay.qml from
+  // `window.screen.x/y` (that output's own global origin) and subtracted
+  // below to convert into local space before it's ever stored.
+  property real screenOffsetX: 0
+  property real screenOffsetY: 0
+
+  property Timer cursorPollTimer: Timer {
+    interval: 33
+    running: root.enabled && root.mode === "orbit"
+    repeat: true
+    triggeredOnStart: true
+    onTriggered: if (!cursorPollProcess.running) cursorPollProcess.running = true
+  }
+
+  property Process cursorPollProcess: Process {
+    command: ["hyprctl", "-j", "cursorpos"]
+    stdout: StdioCollector { id: cursorPollStdout; waitForEnd: true }
+    onExited: function(exitCode, exitStatus) {
+      try {
+        var pos = JSON.parse(cursorPollStdout.text)
+        if (typeof pos.x === "number") root.cursorX = pos.x - root.screenOffsetX
+        if (typeof pos.y === "number") root.cursorY = pos.y - root.screenOffsetY
+      } catch (e) {
+        // A malformed/empty reply just skips this tick's update -- the next
+        // poll 33ms later self-corrects, not worth logging for a toy.
+      }
+    }
+  }
+
   // "landing" mode only: held-key thrust state, driven by Overlay.qml's
   // keyboard handling (which only grabs keyboard focus while this mode is
   // selected and the ball is bouncing -- see WlrLayershell.keyboardFocus
@@ -75,6 +124,17 @@ QtObject {
       root.vx = 0
       root.vy = 0
       root.landingResult = ""
+    } else if (root.mode === "orbit") {
+      // A radial kick would just dive straight into the attractor and get
+      // slingshot out unpredictably -- a TANGENTIAL kick (perpendicular to
+      // the line from the ball to the cursor) is what actually makes it
+      // orbit instead of collide, same as giving a satellite sideways
+      // velocity instead of dropping it straight down.
+      var dx0 = root.cursorX - (root.x + root.size / 2)
+      var dy0 = root.cursorY - (root.y + root.size / 2)
+      var r0 = Math.max(1, Math.hypot(dx0, dy0))
+      root.vx = -(dy0 / r0) * root.speed
+      root.vy = (dx0 / r0) * root.speed
     } else {
       root.vx = v.vx
       root.vy = root.mode === "gravity" ? 0 : v.vy
@@ -173,7 +233,8 @@ QtObject {
       size: root.size, mode: root.mode, gravity: root.gravity,
       width: root.viewportWidth, height: root.viewportHeight,
       thrustUp: root.thrustUp, thrustLeft: root.thrustLeft, thrustRight: root.thrustRight,
-      landingResult: root.landingResult
+      landingResult: root.landingResult,
+      attractorX: root.cursorX, attractorY: root.cursorY
     }, dt)
     root.x = next.x
     root.y = next.y
@@ -225,7 +286,9 @@ QtObject {
         thrustUp: root.thrustUp,
         thrustLeft: root.thrustLeft,
         thrustRight: root.thrustRight,
-        landingResult: root.landingResult
+        landingResult: root.landingResult,
+        cursorX: root.cursorX,
+        cursorY: root.cursorY
       })
     }
     // Mirror what the settings panel's buttons already do, so a keybinding
