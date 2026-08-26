@@ -142,6 +142,23 @@ and nothing persists once it's off.
   it only read as broken on a *photo of a sphere itself* (its own margins
   and radial shading, not the mapping, were the actual source of the
   mess), and the fallback wasn't worth losing full coverage over.
+- **The Image style's cells have straight left/right edges, not the true
+  curved meridian edges the Amiga checker's cells have.** QtQuick's Canvas
+  silently drops a `drawImage` call once the active clip is the full
+  circle+rect+meridian-polygon stack `clipSphereCell` builds -- confirmed
+  empirically by process of elimination: the identical clip stack with
+  `fillRect` (what the checker style uses) never drops a paint; forcing
+  a larger destination rect didn't help at any size tried, ruling out "the
+  destination is too thin"; a `createPattern`+`fillRect` swap-in for
+  `drawImage` rendered nothing at all (pattern fills aren't supported
+  here); and progressively simplifying the clip -- circle alone, then
+  circle+rect -- made the missing cells reappear right as the meridian
+  polygon was dropped, and stayed gone once it was. So the Image style
+  clips to a plain rect (circle + the cell's own bounding box) instead:
+  still correctly positioned, sized, and foreshortened, just with a flat
+  edge where the polygon version would have a slight curve -- invisible at
+  the current cell count in practice, and a much better trade than the
+  gaps a bugged `drawImage` call left in their place.
 
 ## Permissions & dependencies
 

@@ -260,6 +260,23 @@ function drawAmigaChecker(ctx, r, phaseRad) {
 // photo that is itself a photo of a sphere (checkerboard ball, global
 // backgrounds) traces back to that photo's own margins and radial shading,
 // not to this mapping.
+// Each cell clips to a plain rect (the circle plus the cell's own bled
+// bounding box), not the true curved meridian polygon clipSphereCell/
+// drawAmigaChecker use. QtQuick's Canvas silently drops a drawImage call
+// once the active clip is that full circle+rect+polygon stack -- confirmed
+// empirically by process of elimination: the identical stack with fillRect
+// (drawAmigaChecker) never drops a paint; widening the thin destination
+// spans that occur near the silhouette didn't help at any size tried,
+// ruling out "the destination rect is too thin"; a createPattern+fillRect
+// swap-in for drawImage rendered nothing at all (pattern fills aren't
+// supported here); and progressively simplifying the clip -- circle alone,
+// then circle+rect -- made the missing cells reappear right as the
+// meridian polygon was dropped, and stayed gone once it was. A
+// straight-edged rect cell is the trade for working around that: still
+// correctly positioned, sized, and foreshortened (dx/dw and yTop/
+// bandHeight are unchanged from the polygon version), just without the
+// slight curve each cell's left/right edge would otherwise have --
+// invisible at this cell count in practice.
 function drawImageSphere(ctx, r, phaseRad, image, imgWidth, imgHeight) {
   var latBands = 10
   var lonBands = 20
@@ -293,8 +310,15 @@ function drawImageSphere(ctx, r, phaseRad, image, imgWidth, imgHeight) {
       var dx = Math.min(cell.ampLeft, cell.ampRight)
       var dw = Math.max(0.5, Math.abs(cell.ampRight - cell.ampLeft))
 
+      // Plain rect clip, not clipSphereCell's polygon -- see the function
+      // docblock above for why.
       ctx.save()
-      clipSphereCell(ctx, r, cell.yTop, cell.bandHeight, cell.phiLo, cell.phiHi, cell.ampLeft, cell.ampRight)
+      ctx.beginPath()
+      ctx.arc(0, 0, r, 0, Math.PI * 2)
+      ctx.clip()
+      ctx.beginPath()
+      ctx.rect(dx, cell.yTop, dw, cell.bandHeight)
+      ctx.clip()
       ctx.drawImage(image, sx, sy, sw, sh, dx, cell.yTop, dw, cell.bandHeight)
       ctx.restore()
     }
