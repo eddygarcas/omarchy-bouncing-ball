@@ -21,7 +21,18 @@ var stylePresets = [
 
 var physicsPresets = [
   { label: "Classic bounce", value: "classic" },
-  { label: "Gravity drop", value: "gravity" }
+  { label: "Gravity drop", value: "gravity" },
+  { label: "Landing", value: "landing" }
+]
+
+// Scaled proportionally from real surface gravity (Earth 9.81 m/s^2) onto
+// the existing 900 px/s^2 "Earth" constant Gravity drop/Landing always used
+// before this was adjustable, so picking Earth reproduces the old behavior
+// exactly.
+var gravityPresets = [
+  { label: "Moon", gravity: 150 },
+  { label: "Mars", gravity: 340 },
+  { label: "Earth", gravity: 900 }
 ]
 
 var colorSwatches = [
@@ -64,14 +75,47 @@ function randomVelocity(speed) {
 }
 
 // Advances the physics state by dt seconds. `state` is a plain object with
-// x, y, vx, vy, size, mode ("classic"|"gravity"), width, height (viewport).
-// Mutates and returns it so callers can assign properties back in one pass.
+// x, y, vx, vy, size, mode ("classic"|"gravity"|"landing"), width, height
+// (viewport), gravity (px/s^2, only read for "gravity"/"landing", defaults
+// to Earth's 900 if omitted). "landing" additionally reads thrustUp/thrustLeft/thrustRight
+// (booleans, held-key state -- see Overlay.qml's keyboard handling) and
+// landingResult (""|"success"|"crash", persisted across calls by the
+// caller). Mutates and returns it so callers can assign properties back in
+// one pass.
+//
+// Landing applies the same gravity as Gravity drop, plus thrust the player
+// controls: Up fights gravity (net accel while held is thrustPower -
+// gravity, upward -- picked so holding Up alone climbs, letting go free-
+// falls, matching a lunar-lander feel), Left/Right nudge horizontal
+// velocity to correct drift. landingResult is decided ONCE, at the instant
+// the ball first reaches the floor after being airborne (s.y going from
+// <maxY to >=maxY): impact speed under landingSpeedThreshold is a "success"
+// (the ball stops dead, standing still, per the actual goal); anything
+// faster is a "crash", which instead falls through to the same bounce-and-
+// damping the ball would do with no control at all -- reads as a rough,
+// bouncy landing rather than a clean stop, which is the whole visual
+// difference between the two outcomes. landingResult resets to "" only
+// when the ball leaves the floor WHILE thrustUp is held, so a deliberate
+// launch for another attempt gets freshly judged on its own next touchdown
+// -- but a "crash" keeps reading as a crash through its own passive
+// bounce-and-settle, rather than flipping back to "no result yet" (and
+// possibly "success") the instant its own bounce physics lift it back off
+// the floor with nobody touching the controls.
 function step(state, dt) {
   var s = state
-  var gravity = 900
+  var gravity = s.gravity || 900
   var damping = 0.82
+  var thrustPower = 1700
+  var lateralThrustPower = 650
+  var landingSpeedThreshold = 140
 
-  if (s.mode === "gravity") s.vy += gravity * dt
+  if (s.mode === "gravity" || s.mode === "landing") s.vy += gravity * dt
+
+  if (s.mode === "landing") {
+    if (s.thrustUp) s.vy -= thrustPower * dt
+    if (s.thrustLeft) s.vx -= lateralThrustPower * dt
+    if (s.thrustRight) s.vx += lateralThrustPower * dt
+  }
 
   s.x += s.vx * dt
   s.y += s.vy * dt
@@ -85,6 +129,30 @@ function step(state, dt) {
   if (s.y < 0) {
     s.y = 0
     s.vy = Math.abs(s.vy)
+  } else if (s.mode === "landing") {
+    if (s.y >= maxY) {
+      s.y = maxY
+      if (!s.landingResult) {
+        var impactSpeed = Math.hypot(s.vx, s.vy)
+        s.landingResult = impactSpeed < landingSpeedThreshold ? "success" : "crash"
+      }
+      if (s.landingResult === "success") {
+        s.vx = 0
+        s.vy = 0
+      } else {
+        s.vy = -Math.abs(s.vy) * damping
+        s.vx *= 0.92
+        if (Math.abs(s.vy) < 40) s.vy = 0
+      }
+    } else if (s.thrustUp) {
+      // Only a deliberate up-thrust clears the prior outcome for a fresh
+      // attempt -- a "crash" needs to keep reading as a crash through its
+      // own passive bounce-and-settle (the same damped bounce physics
+      // Gravity drop always does), not flip back to "no result yet" (and
+      // then possibly "success") the instant it bounces back off the floor
+      // on its own.
+      s.landingResult = ""
+    }
   } else if (s.y > maxY) {
     s.y = maxY
     if (s.mode === "gravity") {
@@ -441,6 +509,7 @@ if (typeof module !== "undefined") {
     speedPresets: speedPresets,
     stylePresets: stylePresets,
     physicsPresets: physicsPresets,
+    gravityPresets: gravityPresets,
     colorSwatches: colorSwatches,
     clamp: clamp,
     randomVelocity: randomVelocity,

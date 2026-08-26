@@ -23,9 +23,29 @@ QtObject {
   property string style: "amiga"
   property string color: "#e6392b"
   property string mode: "classic"
+  property real gravity: 900
   property real rotation: 0
   property real viewportWidth: 1920
   property real viewportHeight: 1080
+
+  // "landing" mode only: held-key thrust state, driven by Overlay.qml's
+  // keyboard handling (which only grabs keyboard focus while this mode is
+  // selected and the ball is bouncing -- see WlrLayershell.keyboardFocus
+  // there). landingResult is "" while airborne/undecided, else "success" or
+  // "crash" -- see Model.js's step() docblock for exactly when it's set.
+  property bool thrustUp: false
+  property bool thrustLeft: false
+  property bool thrustRight: false
+  property string landingResult: ""
+
+  // Safety net for a key release Overlay.qml's keyboard handler might miss
+  // (e.g. the mode is switched away mid-thrust, taking keyboard focus with
+  // it before a key-up ever arrives) -- never leave a thrust flag stuck on.
+  onModeChanged: {
+    root.thrustUp = false
+    root.thrustLeft = false
+    root.thrustRight = false
+  }
 
   // Absolute path to the image last picked for the "image" style. Chosen via
   // pickImage(), which shells out to Omarchy's own image picker rather than
@@ -49,8 +69,16 @@ QtObject {
     var v = Model.randomVelocity(root.speed)
     root.x = Math.max(0, root.viewportWidth / 2 - root.size / 2)
     root.y = Math.max(0, root.viewportHeight / 3)
-    root.vx = v.vx
-    root.vy = root.mode === "gravity" ? 0 : v.vy
+    if (root.mode === "landing") {
+      // A fair, controlled start -- no random sideways kick to fight before
+      // the player has even touched a key, unlike the other two modes.
+      root.vx = 0
+      root.vy = 0
+      root.landingResult = ""
+    } else {
+      root.vx = v.vx
+      root.vy = root.mode === "gravity" ? 0 : v.vy
+    }
     root.enabled = true
   }
 
@@ -58,6 +86,9 @@ QtObject {
     root.enabled = false
     root.keepAwake = false
     root.keepAwakeEndsAt = 0
+    root.thrustUp = false
+    root.thrustLeft = false
+    root.thrustRight = false
   }
 
   function toggle() {
@@ -139,13 +170,16 @@ QtObject {
     if (!root.enabled) return
     var next = Model.step({
       x: root.x, y: root.y, vx: root.vx, vy: root.vy,
-      size: root.size, mode: root.mode,
-      width: root.viewportWidth, height: root.viewportHeight
+      size: root.size, mode: root.mode, gravity: root.gravity,
+      width: root.viewportWidth, height: root.viewportHeight,
+      thrustUp: root.thrustUp, thrustLeft: root.thrustLeft, thrustRight: root.thrustRight,
+      landingResult: root.landingResult
     }, dt)
     root.x = next.x
     root.y = next.y
     root.vx = next.vx
     root.vy = next.vy
+    root.landingResult = next.landingResult
     root.rotation = (root.rotation + root.vx * dt * 0.6) % 360
   }
 
@@ -181,19 +215,24 @@ QtObject {
       return JSON.stringify({
         state: root.enabled ? "bouncing" : "stopped",
         x: root.x, y: root.y, vx: root.vx, vy: root.vy,
-        size: root.size, style: root.style, mode: root.mode,
+        size: root.size, style: root.style, mode: root.mode, gravity: root.gravity,
         viewportWidth: root.viewportWidth, viewportHeight: root.viewportHeight,
         keepAwake: root.keepAwake,
         keepAwakeMinutes: root.keepAwakeMinutes,
         keepAwakeEndsAt: root.keepAwakeEndsAt,
         imagePath: root.imagePath,
-        imagePickerRunning: root.imagePickerRunning
+        imagePickerRunning: root.imagePickerRunning,
+        thrustUp: root.thrustUp,
+        thrustLeft: root.thrustLeft,
+        thrustRight: root.thrustRight,
+        landingResult: root.landingResult
       })
     }
     // Mirror what the settings panel's buttons already do, so a keybinding
     // or script can drive the same knobs.
     function setSize(value: string): string { root.size = Number(value); return String(root.size) }
     function setMode(value: string): string { root.mode = value; return root.mode }
+    function setGravity(value: string): string { root.gravity = Number(value); return String(root.gravity) }
     function setStyle(value: string): string { root.style = value; return root.style }
     function setSpeedIpc(value: string): string { root.setSpeed(Number(value)); return String(root.speed) }
     function keepAwakeStart(value: string): string { root.startKeepAwake(Number(value)); return String(root.keepAwakeMinutes) }

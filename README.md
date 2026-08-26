@@ -45,8 +45,28 @@ Click the bar icon (a soccer ball) to open the panel:
 - **Size** — S / M / L / XL / XXL.
 - **Speed** — Chill / Normal / Fast / Turbo.
 - **Physics** — Classic bounce (constant velocity, bounces off all four
-  edges forever, DVD-logo style) or Gravity drop (falls, loses energy each
-  bounce, eventually settles and rolls along the floor).
+  edges forever, DVD-logo style), Gravity drop (falls, loses energy each
+  bounce, eventually settles and rolls along the floor), or Landing (a
+  lunar-lander-style mini-game: the ball falls under the same gravity as
+  Gravity drop, but **↑** thrusts up against it and **← / →** nudge it
+  sideways, both held-to-thrust rather than one-shot taps. Touch down
+  gently and it comes to a dead stop — a clean landing; come in too fast
+  and it's a rough, bouncy crash instead. Either way, hold **↑** again once
+  it's settled to lift off for another attempt. The panel shows the
+  controls and the current attempt's outcome while Landing is selected.
+  **Landing is the one physics mode that reads keyboard input** — click
+  the ball once to give it keyboard control (the same click also boops
+  it), then **↑ / ← / →** fly it; click anywhere else and it lets go
+  again, same as clicking into a different app window would.
+- **Gravity** — a slider (50–2000 px/s²) for free adjustment, plus Moon /
+  Mars / Earth preset buttons that jump straight to real-world-scaled
+  values and light up whenever the slider happens to land exactly on one.
+  Only shown while Gravity drop or Landing is selected (Classic bounce
+  ignores gravity entirely). Earth (900 px/s²) is the same strength Gravity
+  drop and Landing always used; Moon (150) and Mars (340) are scaled down
+  proportionally to their real surface gravity, so Landing under Moon
+  gravity gives you a much longer, more forgiving descent to practice a
+  soft touchdown than Earth does.
 - **Keep Awake** — a toggle plus a slider (0 to 3 hours, in 5-minute steps;
   0 means "until you turn it off"). Turning it on starts the ball bouncing
   if it isn't already and inhibits the system idle cycle for the chosen
@@ -59,7 +79,9 @@ Click the bar icon (a soccer ball) to open the panel:
 Click the ball itself at any point to boop it — it kicks upward and nudges
 sideways *away* from wherever you clicked, like batting a real ball. That
 works whether it's mid-bounce or has already settled at the bottom in
-Gravity mode, so repeated clicking is how you keep it going.
+Gravity mode, so repeated clicking is how you keep it going. It also works
+as a mouse-only way to relaunch a landed or crashed ball in Landing mode,
+instead of the keyboard.
 
 It renders as a full-screen, click-through overlay (the same technique
 Omarchy's own on-screen-display uses): everywhere except the ball itself
@@ -227,6 +249,32 @@ and nothing persists once it's off.
   on -- the same mechanism any idle-inhibiting app uses, not a custom
   workaround. It only takes effect while this plugin's overlay window is
   visible and Keep Awake is toggled on, and stops the moment either is off.
+- The Landing physics mode only takes keyboard focus once the player
+  explicitly clicks the ball (`wantsFocus` in `Overlay.qml`), and releases
+  it again on the very next click anywhere else -- it does NOT grab
+  keyboard focus just because Landing is selected and the ball is bouncing.
+  Two earlier designs were tried and both confirmed live to be real bugs,
+  not just theoretical: (1) a permanent `WlrKeyboardFocus.Exclusive` grab
+  for the whole time Landing was selected+bouncing trapped the entire
+  session's keyboard AND mouse; (2) a permanent `WlrKeyboardFocus.OnDemand`
+  grab (primed via a brief `Exclusive` burst, mirroring Omarchy's own
+  `KeyboardPanel.qml`) still swallowed clicks aimed at other windows
+  entirely -- verified with real synthetic clicks via `ydotool` and
+  `hyprctl activewindow` as ground truth, not just visual impression. In
+  this Hyprland version, a layer-shell surface holding ANY non-None
+  keyboard-interactivity appears to capture pointer input for its full
+  extent, not just its declared input-region mask, for as long as it holds
+  that focus -- so the only way to actually let clicks through is to never
+  hold it longer than a single click-to-click window: the mask widens to
+  full-screen and keyboard focus (briefly primed `Exclusive`, then
+  `OnDemand`) is requested only between a click on the ball and the next
+  click anywhere else, which a dedicated full-screen `MouseArea`
+  (`focusReleaseCatcher`, placed so the ball's own click still wins over
+  it) detects and immediately releases. That release click is itself
+  consumed (Wayland has no way to forward it on to the window underneath),
+  so leaving Landing mode's keyboard control takes one click to release
+  focus and, if you wanted to click something specific, one more to do it
+  -- same as dismissing any other focus-grabbing overlay.
 - Like every Quickshell plugin, this code runs unsandboxed inside that
   shared process -- review `Panel.qml` / `Service.qml` / `Overlay.qml` /
   `Model.js` before installing.

@@ -343,6 +343,81 @@ Panel {
               }
             }
           }
+
+          // Only Gravity drop and Landing actually apply gravity -- see
+          // Model.js's step(). The slider gives free control over the exact
+          // value; the preset buttons below jump straight to Moon/Mars/Earth
+          // and -- via the same `active` highlight every other preset row in
+          // this panel already uses -- double as a check for whether the
+          // slider is currently sitting exactly on one of them.
+          Column {
+            visible: !!(root.svc && (root.svc.mode === "gravity" || root.svc.mode === "landing"))
+            width: parent.width
+            spacing: Style.space(6)
+
+            PanelSlider {
+              bar: root.bar
+              width: parent.width
+              minimum: 50
+              maximum: 2000
+              step: 10
+              integer: true
+              value: root.svc ? root.svc.gravity : 900
+              onMoved: function(v) { if (root.svc) root.svc.gravity = v }
+              onReleased: function(v) { if (root.svc) root.svc.gravity = v }
+            }
+
+            Text {
+              text: {
+                if (!root.svc) return ""
+                var match = Model.gravityPresets.find(function(p) { return p.gravity === root.svc.gravity })
+                return Math.round(root.svc.gravity) + " px/s²" + (match ? " · " + match.label : "")
+              }
+              color: Qt.darker(root.bar.foreground, 1.4)
+              font.family: root.bar.fontFamily
+              font.pixelSize: Style.font.caption
+            }
+
+            Flow {
+              width: parent.width
+              spacing: Style.space(6)
+
+              Repeater {
+                model: Model.gravityPresets
+                Button {
+                  required property var modelData
+                  text: modelData.label
+                  fontSize: Style.font.bodySmall
+                  foreground: root.bar.foreground
+                  fontFamily: root.bar.fontFamily
+                  bordered: true
+                  active: root.svc && root.svc.gravity === modelData.gravity
+                  onClicked: if (root.svc) root.svc.gravity = modelData.gravity
+                }
+              }
+            }
+          }
+
+          // Landing has no on-screen HUD of its own (the overlay is a
+          // click-through canvas, not a full app window) -- this is the
+          // only place the controls and the current attempt's outcome are
+          // shown, so it doubles as both the instructions and the result.
+          Text {
+            visible: !!(root.svc && root.svc.mode === "landing")
+            width: parent.width
+            wrapMode: Text.WordWrap
+            text: {
+              if (!root.svc) return ""
+              if (root.svc.landingResult === "success") return "🛬 Landed! Click the ball, then hold ↑ to lift off for another try."
+              if (root.svc.landingResult === "crash") return "💥 Crashed — click the ball, then hold ↑ to try again."
+              return "Click the ball to take control: ↑ thrusts up · ← → steer sideways. Touch down gently to land. Click elsewhere to let go again."
+            }
+            color: root.svc && root.svc.landingResult === "crash" ? "#e6392b"
+              : root.svc && root.svc.landingResult === "success" ? "#16a085"
+              : Qt.darker(root.bar.foreground, 1.4)
+            font.family: root.bar.fontFamily
+            font.pixelSize: Style.font.caption
+          }
         }
       }
     }

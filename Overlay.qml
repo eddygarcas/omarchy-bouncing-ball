@@ -19,16 +19,80 @@ Item {
     color: "transparent"
     WlrLayershell.namespace: "eduard-bouncing-ball"
     WlrLayershell.layer: WlrLayer.Overlay
-    WlrLayershell.keyboardFocus: WlrKeyboardFocus.None
+    // Only "landing" mode ever wants keyboard input (Up/Left/Right thrust
+    // -- see keyCapture below), and even then only once the player has
+    // actually clicked the ball to engage it -- see `wantsFocus` and
+    // `focusReleaseCatcher` below. Landing mode landed here through two
+    // rounds of live testing that both turned out wrong:
+    //
+    // Round 1 (Exclusive the whole time Landing was selected+bouncing):
+    // confirmed live to hijack the ENTIRE session's keyboard AND mouse for
+    // the whole duration, not just while a thrust key was held.
+    //
+    // Round 2 (OnDemand the whole time, primed via a brief Exclusive burst
+    // on becoming active -- the same pattern Omarchy's own
+    // KeyboardPanel.qml uses): still confirmed live, with real synthetic
+    // clicks via `ydotool` and `hyprctl activewindow` as ground truth (not
+    // just visual impression), to swallow clicks aimed at OTHER windows
+    // entirely -- `hyprctl activewindow` never changed even when clicking
+    // squarely inside another window's geometry. Root cause: this overlay
+    // stays mapped/visible continuously for the whole bouncing session
+    // (`visible` depends only on `enabled`, not `mode`), and in this
+    // Hyprland version, once a layer-shell surface holds ANY non-None
+    // keyboard-interactivity (Exclusive OR OnDemand), it appears to
+    // capture pointer input for its full extent, not just its declared
+    // `mask` input region -- contradicting the plain wlr-layer-shell spec,
+    // but empirically reproducible.
+    //
+    // Because of that, the only surface-side way to actually let clicks
+    // reach other windows while holding keyboard focus is what
+    // KeyboardPanel.qml also does: catch every click yourself, full-screen,
+    // and immediately drop keyboard focus (and shrink the input region back
+    // down) the instant a click lands somewhere other than the thing that's
+    // supposed to keep focus. `wantsFocus` is that state -- true only
+    // between an explicit click on the ball (see canvas's MouseArea below)
+    // and the next click anywhere else (see `focusReleaseCatcher`).
+    readonly property bool landingActive: !!(root.service && root.service.enabled && root.service.mode === "landing")
+    property bool wantsFocus: false
+    property bool focusPrimed: false
+    WlrLayershell.keyboardFocus: wantsFocus
+      ? (focusPrimed ? WlrKeyboardFocus.OnDemand : WlrKeyboardFocus.Exclusive)
+      : WlrKeyboardFocus.None
+
+    // Safety net: leaving Landing mode (switching physics, picking a
+    // different style, or stopping the ball) always drops focus immediately,
+    // even if the player never explicitly clicked away first.
+    onLandingActiveChanged: if (!landingActive) wantsFocus = false
+
+    onWantsFocusChanged: {
+      if (wantsFocus) {
+        focusPrimed = false
+        focusPrimeTimer.restart()
+      } else {
+        focusPrimeTimer.stop()
+        focusPrimed = false
+      }
+    }
+
+    Timer {
+      id: focusPrimeTimer
+      interval: 75
+      onTriggered: if (window.wantsFocus) window.focusPrimed = true
+    }
     exclusionMode: ExclusionMode.Ignore
-    // The clickable input region tracks the ball's bounding box via
-    // `hitboxAnchor`, not the visual `canvas` directly, so the rest of the
-    // screen stays click-through. Region{item:...} pushes a fresh Wayland
-    // input-region update whenever the tracked item's geometry changes;
-    // syncing to a slow stand-in instead of canvas (which moves every 60Hz
-    // physics tick) keeps that update rate down without needing canvas
-    // itself to move any less smoothly.
-    mask: Region { item: hitboxAnchor }
+    // Normally the clickable input region tracks only the ball's bounding
+    // box via `hitboxAnchor`, so the rest of the screen stays click-through
+    // -- see `maskSyncTimer` below. While `wantsFocus` is true, though, the
+    // mask widens to the full window so `focusReleaseCatcher` can actually
+    // see the click that should release focus (see the block comment on
+    // `keyboardFocus` above for why this widen-then-release dance is
+    // necessary at all here).
+    mask: Region {
+      x: window.wantsFocus ? 0 : hitboxAnchor.x
+      y: window.wantsFocus ? 0 : hitboxAnchor.y
+      width: window.wantsFocus ? window.width : hitboxAnchor.width
+      height: window.wantsFocus ? window.height : hitboxAnchor.height
+    }
 
     // Backs the "Keep Awake" panel toggle: this is the standard Wayland
     // idle-inhibit-v1 protocol, which the built-in idle/lock service already
@@ -56,6 +120,51 @@ Item {
       id: hitboxAnchor
       width: root.service ? root.service.size : 0
       height: root.service ? root.service.size : 0
+    }
+
+    // Catches the click that should give focus back to whatever's below --
+    // only present at all while `wantsFocus` is true (i.e. only while the
+    // mask above has been widened to full-screen; see the block comment on
+    // `keyboardFocus`). Declared before `canvas` so canvas -- rendered and
+    // hit-tested after it -- wins for clicks actually on the ball; this
+    // only ever sees clicks that land outside canvas's own bounds. Dropping
+    // `wantsFocus` here doesn't forward this specific click through to the
+    // window underneath (Wayland has no such "forward" operation from a
+    // client), so the ball itself grabs the mouse for exactly one click to
+    // release; the very next click reaches the real target normally, once
+    // the mask has shrunk back down to just the ball's hitbox again.
+    MouseArea {
+      id: focusReleaseCatcher
+      anchors.fill: parent
+      enabled: window.wantsFocus
+      acceptedButtons: Qt.AllButtons
+      onPressed: window.wantsFocus = false
+    }
+
+    // Reads Up/Left/Right thrust into the service while "landing" mode has
+    // keyboard focus (see WlrLayershell.keyboardFocus above) -- tracked as
+    // plain held/released state (not relying on OS key-repeat) so thrust is
+    // smooth and continuous for as long as a key is actually down. Release
+    // events aren't autorepeated by Qt, only press events are, so onReleased
+    // firing at all is always a genuine key-up; onPressed doesn't need to
+    // distinguish a repeat from the original press since setting an
+    // already-true flag back to true is a no-op.
+    Item {
+      id: keyCapture
+      anchors.fill: parent
+      focus: window.wantsFocus
+      Keys.onPressed: function(event) {
+        if (!root.service) return
+        if (event.key === Qt.Key_Up) { root.service.thrustUp = true; event.accepted = true }
+        else if (event.key === Qt.Key_Left) { root.service.thrustLeft = true; event.accepted = true }
+        else if (event.key === Qt.Key_Right) { root.service.thrustRight = true; event.accepted = true }
+      }
+      Keys.onReleased: function(event) {
+        if (!root.service) return
+        if (event.key === Qt.Key_Up) { root.service.thrustUp = false; event.accepted = true }
+        else if (event.key === Qt.Key_Left) { root.service.thrustLeft = false; event.accepted = true }
+        else if (event.key === Qt.Key_Right) { root.service.thrustRight = false; event.accepted = true }
+      }
     }
 
     Timer {
@@ -200,7 +309,10 @@ Item {
       // Click the ball to boop it back into the air -- offset from center
       // is passed through so a swat to one side sends it the other way.
       // Distance-check against the radius so the mask's square corners
-      // (outside the visually round ball) don't count as a hit.
+      // (outside the visually round ball) don't count as a hit. In Landing
+      // mode this same click is also what engages `wantsFocus` (see the
+      // block comment on `keyboardFocus` above) -- clicking the ball both
+      // boops it and hands it keyboard control in one gesture.
       MouseArea {
         anchors.fill: parent
         onClicked: function(mouse) {
@@ -210,6 +322,7 @@ Item {
           var dy = mouse.y - r
           if (dx * dx + dy * dy > r * r) return
           root.service.hit(dx, dy)
+          if (root.service.mode === "landing") window.wantsFocus = true
         }
       }
     }
