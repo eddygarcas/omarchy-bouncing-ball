@@ -121,23 +121,27 @@ and nothing persists once it's off.
   already reads as that kind of map -- an ordinary photo doesn't, so it got
   sliced into ~20 disconnected vertical ribbons instead of reading as
   wrapped around a sphere. The current approach instead treats the image as
-  a flat circular photo glued to one hemisphere: both source axes use
+  a flat circular photo glued to the ball's surface: both source axes use
   `amp = r*sin(angle)` (the same linear-disc spacing the destination
   geometry and the checker style already use) rather than the angle itself,
   so the image compresses toward the limb the way the sphere's own
   foreshortening already does, and a given patch of the image stays glued
   to the same patch of the ball's surface as it spins (using each cell's
   *intrinsic* longitude, not the rotated one) instead of scrolling
-  sideways underneath the wedges. The trade-off: `sin()` only maps a
-  180-degree span onto the image monotonically, so the image only covers
-  the half of the sphere where that holds (`isImageDecalWedge`) -- the
-  other half falls back to the plain `color` fill `solid` uses, like the
-  back of a sticker. Texturing the full sphere anyway (dropping that
-  hemisphere split) was tried and rejected: verified with a synthetic
-  striped test image and a standalone pycairo render (independent of any
-  live-desktop screenshot) that it produces a visible fold where the image
-  samples itself from two directions at once, right at the seam between
-  the mapping's monotonic and non-monotonic spans.
+  sideways underneath the wedges. The image covers the whole ball, not
+  just one hemisphere: `sin` isn't globally monotonic over a full turn
+  (it rises across the front quarter-turns and mirrors back down across
+  the back ones), so the back hemisphere shows the image mirrored rather
+  than a second, independent copy -- the two meet exactly at the image's
+  own left/right edges, with no jump. An earlier version limited the
+  image to only the front hemisphere (falling back to a plain `color`
+  fill on the back) specifically to dodge that mirroring; dropped after
+  a synthetic striped test image and a standalone pycairo render
+  (independent of any live-desktop screenshot) showed the "fold" that
+  motivated the split was actually this same clean, expected mirror --
+  it only read as broken on a *photo of a sphere itself* (its own margins
+  and radial shading, not the mapping, were the actual source of the
+  mess), and the fallback wasn't worth losing full coverage over.
 
 ## Permissions & dependencies
 

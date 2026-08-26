@@ -224,44 +224,43 @@ function drawAmigaChecker(ctx, r, phaseRad) {
   }
 }
 
-// Wraps a user-picked image around the ball with a fisheye/orthographic
-// mapping -- the image is treated as a flat circular photo glued to one
-// hemisphere of the ball's surface, not as an equirectangular world map. An
-// equirectangular wrap (linear-in-longitude) was the first approach here,
-// but it slices an ordinary photo into ~20 disconnected vertical ribbons,
-// because a normal photo's columns aren't meant to represent continuously
-// adjacent longitudes the way an actual world map's are -- it read as
-// sliced up rather than wrapped around a sphere.
+// Wraps a user-picked image around the WHOLE ball with a fisheye/
+// orthographic mapping, not an equirectangular one. An equirectangular wrap
+// (linear-in-longitude, the same flat layout as a world map) was the first
+// approach here, but it slices an ordinary photo into ~20 disconnected
+// vertical ribbons, because a normal photo's columns aren't meant to
+// represent continuously adjacent longitudes the way an actual world map's
+// are -- it read as sliced up rather than wrapped around a sphere.
 //
 // Both source axes here use `amp = r*sin(angle)` -- the same linear-disc
 // spacing the destination geometry already uses for both the checker and
 // this style -- instead of the angle itself, so the source image compresses
-// toward the limb exactly the way the destination already does. That keeps
-// one coherent, recognizable image across the visible hemisphere at any
-// instant, rather than a filmstrip of narrow strips.
+// toward the limb exactly the way the destination already does.
 //
 // Horizontal position uses each wedge's INTRINSIC longitude (`wj*lonStep`,
 // not `phaseRad + wj*lonStep`) so a given patch of the image stays glued to
-// the same patch of the ball's surface as it spins -- like a sticker on a
-// rotating globe -- instead of the image scrolling sideways underneath the
-// wedges as `phaseRad` advances.
+// the same patch of the ball's surface as it spins -- like a sticker glued
+// all the way around a rotating globe -- instead of the image scrolling
+// sideways underneath the wedges as `phaseRad` advances.
 //
-// sin() only maps a 180-degree span onto the image monotonically, so a
-// wedge is only textured if its intrinsic longitude falls within that one
-// canonical front-facing span (`isImageDecalWedge`); the rest of the
-// sphere -- the "back" of the sticker -- falls back to the plain `color`
-// fill `solid` style already uses. Without that split, a rotation phase
-// whose visible hemisphere straddles two different monotonic spans would
-// sample the same source pixels from two different directions at once,
-// which reads as the image folding back on itself right at the seam
-// between those spans -- confirmed visually (rendered head-on with pycairo
-// against a real photo, independent of any live-desktop screenshot) before
-// settling on this fix over just documenting the fold as a known quirk.
-function isImageDecalWedge(wj, lonStep) {
-  return Math.cos((wj + 0.5) * lonStep) > 0
-}
-
-function drawImageSphere(ctx, r, phaseRad, image, imgWidth, imgHeight, color) {
+// `sin` isn't globally monotonic over a full turn: it rises from -r to +r
+// across the front quarter-turns (-90 to 90 degrees) and *mirrors* back
+// down from +r to -r across the back ones (90 to 270). That's not a bug to
+// route around -- it's what makes a single flat image wrap a full sphere at
+// all without a texture that was authored as a 360-degree panorama: the
+// front hemisphere shows the image right-way-round, the back hemisphere
+// shows it mirrored, and the two meet exactly at the image's own left/right
+// edges (amp = +-r) at the seams, so there's no jump, only a fold-line where
+// the mirroring itself is the point (the same trick behind any sphere
+// texture built from a single non-panoramic photo). Verified with a
+// synthetic numbered rainbow-stripe test image rendered head-on via pycairo
+// (independent of any live-desktop screenshot): every tested rotation phase
+// showed either a clean monotonic run or a clean symmetric mirror at the
+// seam, never a broken/jagged discontinuity. A visually busy result on a
+// photo that is itself a photo of a sphere (checkerboard ball, global
+// backgrounds) traces back to that photo's own margins and radial shading,
+// not to this mapping.
+function drawImageSphere(ctx, r, phaseRad, image, imgWidth, imgHeight) {
   var latBands = 10
   var lonBands = 20
   var lonStep = Math.PI * 2 / lonBands
@@ -280,29 +279,23 @@ function drawImageSphere(ctx, r, phaseRad, image, imgWidth, imgHeight, color) {
       var thetaRight = phaseRad + (wj + 1) * lonStep
       if (sphereCellIsBackFacing(thetaLeft, thetaRight)) continue
 
+      var ampTexLeft = r * Math.sin(wj * lonStep)
+      var ampTexRight = r * Math.sin((wj + 1) * lonStep)
+      var sx = (Math.min(ampTexLeft, ampTexRight) + r) / (2 * r) * imgWidth
+      var sw = Math.max(0.5, Math.abs(ampTexRight - ampTexLeft) / (2 * r) * imgWidth)
+
       // The destination rect is deliberately built from the same bled
       // (slightly overlapped) boundary as the clip, not the cell's true
-      // span -- drawImage/fillRect only paint within their own dest rect
-      // regardless of how big the clip is, so a bled clip with a tight
-      // dest rect would still leave the seam.
+      // span -- drawImage only paints within its own dest rect regardless
+      // of how big the clip is, so a bled clip with a tight dest rect would
+      // still leave the seam.
       var cell = bleedSphereCell(r, phiLo, phiHi, thetaLeft, thetaRight, lonStep)
       var dx = Math.min(cell.ampLeft, cell.ampRight)
       var dw = Math.max(0.5, Math.abs(cell.ampRight - cell.ampLeft))
 
       ctx.save()
       clipSphereCell(ctx, r, cell.yTop, cell.bandHeight, cell.phiLo, cell.phiHi, cell.ampLeft, cell.ampRight)
-
-      if (isImageDecalWedge(wj, lonStep)) {
-        var ampTexLeft = r * Math.sin(wj * lonStep)
-        var ampTexRight = r * Math.sin((wj + 1) * lonStep)
-        var sx = (Math.min(ampTexLeft, ampTexRight) + r) / (2 * r) * imgWidth
-        var sw = Math.max(0.5, Math.abs(ampTexRight - ampTexLeft) / (2 * r) * imgWidth)
-        ctx.drawImage(image, sx, sy, sw, sh, dx, cell.yTop, dw, cell.bandHeight)
-      } else {
-        ctx.fillStyle = color
-        ctx.fillRect(-r, -r, 2 * r, 2 * r)
-      }
-
+      ctx.drawImage(image, sx, sy, sw, sh, dx, cell.yTop, dw, cell.bandHeight)
       ctx.restore()
     }
   }
@@ -326,7 +319,7 @@ function drawBall(ctx, size, style, color, phaseDeg, image, imgWidth, imgHeight)
   } else if (style === "image" && image && imgWidth > 0 && imgHeight > 0) {
     ctx.save()
     ctx.translate(r, r)
-    drawImageSphere(ctx, r, (phaseDeg || 0) * Math.PI / 180, image, imgWidth, imgHeight, color)
+    drawImageSphere(ctx, r, (phaseDeg || 0) * Math.PI / 180, image, imgWidth, imgHeight)
     ctx.restore()
   } else {
     ctx.save()
