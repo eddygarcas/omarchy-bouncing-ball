@@ -83,7 +83,76 @@ Item {
       source: root.service && root.service.style === "image" && root.service.imagePath
         ? Util.fileUrl(root.service.imagePath)
         : ""
-      onStatusChanged: if (status === Image.Ready) canvas.requestPaint()
+      onStatusChanged: {
+        if (status === Image.Ready) {
+          colorSampleCanvas.avgColor = ""
+          colorSampleCanvas.requestPaint()
+        }
+        canvas.requestPaint()
+      }
+    }
+
+    // Samples the just-loaded image's BACKGROUND color ONCE per image pick,
+    // for drawImageSphere's un-decaled-hemisphere fallback fill (see its
+    // docblock in Model.js) -- not a per-frame per-pixel reconstruction of
+    // the sphere, which is the thing this plugin's history says never to
+    // reintroduce (see Model.js's note on the old createImageData/
+    // putImageData approach freezing the whole shell). A single getImageData
+    // read of a tiny downscaled canvas, done once when an image is picked,
+    // is a fundamentally different cost than that.
+    //
+    // Averages only the outermost ring of pixels, not the whole image: a
+    // typical picked photo is a subject (here, a ball) roughly centered
+    // against a plain backdrop, so the backdrop is what reaches the edges
+    // while the subject usually doesn't. Averaging every pixel instead
+    // pulled the result toward whatever color the subject itself was
+    // (e.g. a red/white checker ball averaging to a muted pink) rather than
+    // the actual background behind it (plain white, for that same photo).
+    // 32x32, not smaller: at 16x16 each border pixel is a bilinear blend of
+    // a 16x16 block of source pixels, which was close enough to the ball's
+    // silhouette in a test photo to still smudge red into the "background"
+    // read -- 32x32 halves that per-pixel source footprint and landed on
+    // the actual background color cleanly. Still a one-shot cost, not a
+    // per-frame one.
+    Canvas {
+      id: colorSampleCanvas
+      visible: false
+      width: 32
+      height: 32
+      property string avgColor: ""
+
+      onPaint: {
+        var ctx = getContext("2d")
+        ctx.clearRect(0, 0, width, height)
+        ctx.drawImage(textureImage, 0, 0, width, height)
+        var data
+        try {
+          data = ctx.getImageData(0, 0, width, height).data
+        } catch (e) {
+          return
+        }
+        var r = 0, g = 0, b = 0, alphaSum = 0, pixelCount = 0
+        for (var y = 0; y < height; y++) {
+          for (var x = 0; x < width; x++) {
+            if (x !== 0 && x !== width - 1 && y !== 0 && y !== height - 1) continue
+            var i = (y * width + x) * 4
+            var a = data[i + 3]
+            r += data[i] * a
+            g += data[i + 1] * a
+            b += data[i + 2] * a
+            alphaSum += a
+            pixelCount++
+          }
+        }
+        // QtQuick's Canvas has a history of silently dropping drawImage
+        // calls (see Model.js) -- a near-zero alpha sum means this paint
+        // was one of them, not that the image is mostly transparent, so
+        // leave avgColor unset rather than reporting black as the average.
+        if (alphaSum < pixelCount * 8) return
+        avgColor = "rgb(" + Math.round(r / alphaSum) + "," + Math.round(g / alphaSum) + "," + Math.round(b / alphaSum) + ")"
+      }
+
+      onAvgColorChanged: canvas.requestPaint()
     }
 
     Canvas {
@@ -102,7 +171,8 @@ Item {
           ctx, root.service.size, root.service.style, root.service.color, root.service.rotation,
           useImage ? textureImage : null,
           useImage ? textureImage.sourceSize.width : 0,
-          useImage ? textureImage.sourceSize.height : 0
+          useImage ? textureImage.sourceSize.height : 0,
+          colorSampleCanvas.avgColor
         )
       }
 

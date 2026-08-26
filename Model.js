@@ -245,24 +245,29 @@ function drawAmigaChecker(ctx, r, phaseRad) {
 // the wedges as `phaseRad` advances.
 //
 // Only ONE hemisphere gets the image (`isImageDecalWedge`, below); the
-// other falls back to the plain `color` fill via `fillRect`. Not for
-// geometric reasons -- `sin` mirrors cleanly across the back hemisphere
-// (verified with a synthetic striped test image; a full-sphere version
-// with no fallback did once ship, see git history) -- but for reliability.
-// QtQuick's Canvas has repeatedly turned out to silently drop a
-// `drawImage` call under conditions this file could only pin down by
-// elimination, one narrower live reproduction at a time (full clip stack
-// too complex -> simplified to a plain rect; that rect too thin ->
-// widened via `widenThinSpan`, below) -- and each fix looked clean in
-// testing here, then still showed a live gap once actually used. `fillRect`
-// (what `drawAmigaChecker` uses) has never dropped a paint in any test
-// through this whole process, however narrow or however many per frame.
-// Limiting `drawImage` to half the cells trades full-sphere image coverage
-// for cutting the number of `drawImage` calls -- and therefore the
-// exposure to whatever about this bug still isn't fully understood -- in
-// half. If a gap ever turns up even here, the next step is dropping
-// `drawImage` for this style entirely, not narrowing the surviving half
-// further.
+// other falls back to a solid fill via `fillRect`. A full-sphere version
+// (using `sin`'s natural front/back mirror symmetry, no fallback needed)
+// did ship briefly and passed every offline geometry check clean -- but
+// live, one side reads as a fragmented, torn version of the image rather
+// than a clean mirror, which a Cairo-based standalone render can't
+// reproduce (it isn't a coordinate-math bug). The `fallbackColor` param is
+// meant to be the image's own background color -- the color at its edges,
+// not an average over the whole photo, since the subject in the middle
+// would otherwise skew it (computed once by the caller, not per-frame --
+// see Overlay.qml) -- not an arbitrary palette color, so the un-decaled
+// hemisphere reads as a plausible continuation of the ball's surface
+// instead of a stock swatch.
+//
+// QtQuick's Canvas has repeatedly turned out to silently drop a `drawImage`
+// call under conditions this file could only pin down by elimination, one
+// narrower live reproduction at a time: the original full clip stack
+// (`clipSphereCell`, what `drawAmigaChecker` uses via `fillRect`, which has
+// never dropped a paint here) was too complex and got simplified to a plain
+// rect; that rect alone still dropped when narrow, fixed by widening both
+// the clip and `drawImage`'s dest rect together via `widenThinSpan` below.
+// Limiting `drawImage` to half the cells cuts the number of calls per frame
+// -- and therefore the exposure to whatever about this bug still isn't
+// fully understood -- in half.
 function isImageDecalWedge(wj, lonStep) {
   return Math.cos((wj + 0.5) * lonStep) > 0
 }
@@ -285,7 +290,7 @@ function widenThinSpan(srcStart, srcSpan, destStart, destSpan, minDestSpan, srcE
   }
 }
 
-function drawImageSphere(ctx, r, phaseRad, image, imgWidth, imgHeight, color) {
+function drawImageSphere(ctx, r, phaseRad, image, imgWidth, imgHeight, fallbackColor) {
   var latBands = 10
   var lonBands = 20
   var lonStep = Math.PI * 2 / lonBands
@@ -345,7 +350,7 @@ function drawImageSphere(ctx, r, phaseRad, image, imgWidth, imgHeight, color) {
         ctx.beginPath()
         ctx.rect(dx, cell.yTop, dw, cell.bandHeight)
         ctx.clip()
-        ctx.fillStyle = color
+        ctx.fillStyle = fallbackColor
         ctx.fillRect(-r, -r, 2 * r, 2 * r)
       }
 
@@ -359,8 +364,12 @@ function drawImageSphere(ctx, r, phaseRad, image, imgWidth, imgHeight, color) {
 // to spin the checker/image sphere (amiga/image) or just orient the
 // highlight. `image`/`imgWidth`/`imgHeight` are only needed for "image" --
 // omit or pass a not-yet-loaded image and it falls back to a plain `color`
-// fill, same as "solid".
-function drawBall(ctx, size, style, color, phaseDeg, image, imgWidth, imgHeight) {
+// fill, same as "solid". `imageFallbackColor`, also only for "image", is
+// the color used on the hemisphere the image doesn't cover -- ideally the
+// image's own background color (see Overlay.qml), falling back to `color`
+// itself if that hasn't been computed yet (e.g. the first frame or two
+// right after picking an image).
+function drawBall(ctx, size, style, color, phaseDeg, image, imgWidth, imgHeight, imageFallbackColor) {
   var r = size / 2
   ctx.clearRect(0, 0, size, size)
 
@@ -372,7 +381,7 @@ function drawBall(ctx, size, style, color, phaseDeg, image, imgWidth, imgHeight)
   } else if (style === "image" && image && imgWidth > 0 && imgHeight > 0) {
     ctx.save()
     ctx.translate(r, r)
-    drawImageSphere(ctx, r, (phaseDeg || 0) * Math.PI / 180, image, imgWidth, imgHeight, color)
+    drawImageSphere(ctx, r, (phaseDeg || 0) * Math.PI / 180, image, imgWidth, imgHeight, imageFallbackColor || color)
     ctx.restore()
   } else {
     ctx.save()

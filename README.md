@@ -130,11 +130,16 @@ and nothing persists once it's off.
   (using each cell's *intrinsic* longitude, not the rotated one) instead of
   scrolling sideways underneath the wedges. Only cells on the hemisphere
   where that mapping is monotonic get the image (`isImageDecalWedge`); the
-  rest fall back to the plain `color` fill `solid` already uses. A
-  full-sphere version (image mirrored on the back hemisphere) was tried and
-  is mathematically sound -- verified with a synthetic striped test image
-  and a standalone pycairo render -- but was abandoned for a `drawImage`
-  reliability issue documented in the next point, not for a mapping reason.
+  rest fall back to a solid fill using the picked image's own background
+  color (see below), not the panel's palette color. A full-sphere version
+  (image mirrored on the back hemisphere, using `sin`'s natural symmetry) was
+  tried twice -- it's mathematically sound and passes every offline
+  geometry check clean, but live, the un-mirrored hemisphere reads as a
+  fragmented, torn version of the image rather than a clean mirror. That
+  isn't a coordinate-math bug (a Cairo-based standalone render of the exact
+  same algorithm can't reproduce it), so it's presumed to be another
+  manifestation of the `drawImage` reliability issue documented next,
+  rather than a reason to redo the mapping.
 - **`drawImage` has repeatedly, silently dropped paints under QtQuick's
   Canvas, for reasons this file could only chase down empirically, one
   live reproduction at a time -- so the Image style keeps its `drawImage`
@@ -152,23 +157,38 @@ and nothing persists once it's off.
   span to the image's bounds. Limiting `drawImage` to one hemisphere
   (previous point) is the last piece: not a fix for this bug, but cutting
   the number of `drawImage` calls per frame in half cuts the exposure to
-  whatever about it still isn't fully understood. Net effect versus a
-  hypothetical fully-correct version: cells have a flat edge instead of a
-  very slight curve, and only one hemisphere shows the image -- both
-  invisible/minor trade-offs next to the gaps a dropped `drawImage` call
-  left in their place. **A real, unrelated bug found and fixed along the
-  way:** the `color`-fill fallback for non-decal cells originally filled
-  the *entire ball* (`fillRect(-r, -r, 2*r, 2*r)`) rather than clipping to
-  its own cell first -- harmless-looking on its own, since the clip
-  requirement isn't obvious from a solid-color fill, but painted *after* an
-  image cell earlier in the same per-frame loop, it silently erased that
-  image cell (and everything else drawn so far) each time, which is what
-  made most of the image hemisphere disappear behind solid color. Caught
-  by rendering the exact algorithm standalone with each branch mapped to a
-  flat debug color (blue for image cells, red for solid) instead of the
-  real image and clip logic -- the debug render immediately showed far
-  more red than the geometry implied it should, which fillRect/`drawImage`
-  screenshots alone hadn't made obvious.
+  whatever about it still isn't fully understood. **A separate, unrelated
+  bug found and fixed along the way:** the solid-fill fallback for
+  non-decal cells originally filled the *entire ball*
+  (`fillRect(-r, -r, 2*r, 2*r)`) rather than clipping to its own cell
+  first -- harmless-looking on its own, but painted *after* an image cell
+  earlier in the same per-frame loop, it silently erased that image cell
+  (and everything else drawn so far) each time. Caught by rendering the
+  exact algorithm standalone with each branch mapped to a flat debug color
+  (blue for image cells, red for solid) instead of the real image and clip
+  logic -- the debug render immediately showed far more red than the
+  geometry implied it should.
+- **The un-decaled hemisphere's fill color is the picked image's own
+  background color, sampled once per image pick, not a per-frame
+  computation.** `Overlay.qml` draws the loaded image into a hidden 32x32
+  `Canvas` exactly once (when it finishes loading), then averages only the
+  outermost *ring* of that canvas's pixels via a single `getImageData`
+  call -- not every pixel. A typical picked photo is a subject (a ball)
+  roughly centered against a plain backdrop, so the backdrop is what
+  reaches the edges of the frame while the subject usually doesn't;
+  averaging every pixel instead pulled the result toward whatever color
+  the subject itself was (e.g. a red/white checker ball averaging to a
+  muted pink) rather than the plain white actually behind it. 32x32, not
+  smaller, for the same reason: at 16x16 each border pixel is a bilinear
+  blend of a large block of source pixels, close enough to the ball's
+  silhouette in a test photo to still smudge red into the "background"
+  read. Sampling only the ring is still a one-shot cost paid on image pick,
+  categorically different from the per-pixel, per-frame sphere
+  reconstruction the point above warns never to reintroduce. It guards
+  against the same `drawImage`-drops-a-paint issue (a near-zero alpha sum
+  after the draw means the sample itself silently failed) by leaving the
+  color unset rather than reporting black, in which case `Model.js` falls
+  back to the panel's palette color instead.
 
 ## Permissions & dependencies
 
