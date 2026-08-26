@@ -19,7 +19,7 @@ Panel {
     id: button
     anchors.fill: parent
     bar: root.bar
-    text: "●"
+    text: ""
     slotSize: Style.bar.iconSlot
     tooltipText: "Bouncing ball"
     onPressed: function(b) { root.toggle() }
@@ -54,7 +54,7 @@ Panel {
           spacing: Style.space(12)
 
           Text {
-            text: "●"
+            text: ""
             color: root.svc ? root.svc.color : root.bar.foreground
             font.family: root.bar.fontFamily
             font.pixelSize: Style.font.display

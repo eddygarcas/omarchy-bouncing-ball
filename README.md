@@ -36,13 +36,13 @@ external processes.
 
 ## What it does
 
-Click the bar icon (a plain circle) to open the panel:
+Click the bar icon (a soccer ball) to open the panel:
 
 - **Bounce!** — starts/stops the ball.
 - **Style** — Amiga (red/white checker sphere), Solid (pick from 6 colors),
   or Image (wrap a picture of your own around it — click **Choose Image…**
   to pick one from `~/Pictures` via Omarchy's own image picker).
-- **Size** — S / M / L / XL.
+- **Size** — S / M / L / XL / XXL.
 - **Speed** — Chill / Normal / Fast / Turbo.
 - **Physics** — Classic bounce (constant velocity, bounces off all four
   edges forever, DVD-logo style) or Gravity drop (falls, loses energy each

@@ -2,7 +2,8 @@ var sizePresets = [
   { label: "S", size: 50 },
   { label: "M", size: 90 },
   { label: "L", size: 140 },
-  { label: "XL", size: 200 }
+  { label: "XL", size: 200 },
+  { label: "XXL", size: 270 }
 ]
 
 var speedPresets = [
