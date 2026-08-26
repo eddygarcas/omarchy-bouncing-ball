@@ -115,13 +115,29 @@ and nothing persists once it's off.
   never a raw pixel buffer read/write), soak-tested clean with flat CPU and
   no RSS growth over a minute of continuous Image-style repainting. If you
   improve the sphere accuracy, keep it on that side of the line.
-- **The Image style's texture mapping is equirectangular** (the same flat
-  layout as a world map), which is the standard approach for wrapping a 2D
-  image around a sphere -- but it assumes the source image already reads as
-  that kind of map. Wrapping an arbitrary photo (especially one with its
-  own perspective and background, like a photo of an object) produces a
-  warped, sliced look rather than a clean "sticker on a ball" result. This
-  is inherent to equirectangular mapping, not a bug in the slicing.
+- **The Image style uses a fisheye/orthographic mapping, not an
+  equirectangular one.** An equirectangular wrap (the same flat layout as a
+  world map) was the first approach, but it assumes the source image
+  already reads as that kind of map -- an ordinary photo doesn't, so it got
+  sliced into ~20 disconnected vertical ribbons instead of reading as
+  wrapped around a sphere. The current approach instead treats the image as
+  a flat circular photo glued to one hemisphere: both source axes use
+  `amp = r*sin(angle)` (the same linear-disc spacing the destination
+  geometry and the checker style already use) rather than the angle itself,
+  so the image compresses toward the limb the way the sphere's own
+  foreshortening already does, and a given patch of the image stays glued
+  to the same patch of the ball's surface as it spins (using each cell's
+  *intrinsic* longitude, not the rotated one) instead of scrolling
+  sideways underneath the wedges. The trade-off: `sin()` only maps a
+  180-degree span onto the image monotonically, so the image only covers
+  the half of the sphere where that holds (`isImageDecalWedge`) -- the
+  other half falls back to the plain `color` fill `solid` uses, like the
+  back of a sticker. Texturing the full sphere anyway (dropping that
+  hemisphere split) was tried and rejected: verified with a synthetic
+  striped test image and a standalone pycairo render (independent of any
+  live-desktop screenshot) that it produces a visible fold where the image
+  samples itself from two directions at once, right at the seam between
+  the mapping's monotonic and non-monotonic spans.
 
 ## Permissions & dependencies
 
