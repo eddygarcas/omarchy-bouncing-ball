@@ -273,21 +273,38 @@ function isImageDecalWedge(wj, lonStep) {
 }
 
 function widenThinSpan(srcStart, srcSpan, destStart, destSpan, minDestSpan, srcExtent) {
-  if (destSpan >= minDestSpan) {
-    return { srcStart: srcStart, srcSpan: srcSpan, destStart: destStart, destSpan: destSpan }
+  var outStart = srcStart
+  var outSpan = srcSpan
+  var outDestStart = destStart
+  var outDestSpan = destSpan
+
+  if (destSpan < minDestSpan) {
+    var scale = srcSpan / destSpan
+    outDestSpan = minDestSpan
+    outSpan = Math.min(srcExtent, scale * outDestSpan)
+    var destMid = destStart + destSpan / 2
+    var srcMid = srcStart + srcSpan / 2
+    outStart = Math.max(0, Math.min(srcExtent - outSpan, srcMid - outSpan / 2))
+    outDestStart = destMid - outDestSpan / 2
   }
-  var scale = srcSpan / destSpan
-  var newDestSpan = minDestSpan
-  var newSrcSpan = Math.min(srcExtent, scale * newDestSpan)
-  var destMid = destStart + destSpan / 2
-  var srcMid = srcStart + srcSpan / 2
-  var newSrcStart = Math.max(0, Math.min(srcExtent - newSrcSpan, srcMid - newSrcSpan / 2))
-  return {
-    srcStart: newSrcStart,
-    srcSpan: newSrcSpan,
-    destStart: destMid - newDestSpan / 2,
-    destSpan: newDestSpan
-  }
+
+  // Defensive final clamp, applied whether or not the widening above ran:
+  // floating-point rounding in the division/sin-based math that produces
+  // srcStart/srcSpan (here and in the caller) can leave srcStart+srcSpan a
+  // few ULPs past srcExtent -- negligible as a number, but QtQuick's Canvas
+  // throws drawImage()'s IndexSizeError for ANY overage, however small.
+  // Only large enough image dimensions turn that rounding error into an
+  // absolute epsilon big enough to actually cross the line (never
+  // reproduced against a 256x256 test image, reliably reproduced at
+  // 1920x1280 -- one dropped `drawImage` call throws, which aborts the
+  // rest of that repaint, which is what made the whole ball go transparent
+  // rather than just one cell). Clamp span first, then start against
+  // whatever room is left, rather than clamping start first and risking a
+  // zero-width span (itself also an IndexSizeError).
+  outSpan = Math.max(0.01, Math.min(outSpan, srcExtent))
+  outStart = Math.max(0, Math.min(outStart, srcExtent - outSpan))
+
+  return { srcStart: outStart, srcSpan: outSpan, destStart: outDestStart, destSpan: outDestSpan }
 }
 
 function drawImageSphere(ctx, r, phaseRad, image, imgWidth, imgHeight, fallbackColor) {

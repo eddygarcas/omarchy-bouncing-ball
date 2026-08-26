@@ -168,6 +168,26 @@ and nothing persists once it's off.
   (blue for image cells, red for solid) instead of the real image and clip
   logic -- the debug render immediately showed far more red than the
   geometry implied it should.
+- **A related but distinct bug, found later: large picked images (roughly
+  1920px+ on a side) made the ball go fully transparent a moment after
+  looking correct.** Not the same failure mode as the point above (a
+  silently dropped paint) -- this one threw a real, uncaught
+  `drawImage(), index size error` every repaint, visible in Quickshell's
+  own log, which aborted the *rest* of that `onPaint` call (including the
+  rim/gloss overlay), leaving the canvas at whatever `clearRect` had just
+  wiped it to. Root cause: `widenThinSpan`'s source-rect math (and the
+  plain sx/sy/sw/sh math above it) is exact in principle, but floating-
+  point rounding can leave `srcStart + srcSpan` a few ULPs past the
+  image's actual width/height -- negligible as a *number*, but QtQuick's
+  Canvas throws for any overage, however small. That epsilon only crosses
+  into "actually breaks something" territory once the image dimensions
+  are large enough to amplify it into something QtQuick's bounds check can
+  see -- never reproduced against a 256x256 test image, reliably
+  reproduced with a 1920x1280 one, confirmed with a zero-tolerance offline
+  sweep of `widenThinSpan`'s output across a full phase range at both
+  sizes. Fixed by having `widenThinSpan` clamp its own output into
+  `[0, srcExtent]` as a final defensive step, unconditionally, rather than
+  trusting the arithmetic above it to land exactly on the boundary.
 - **The un-decaled hemisphere's fill color is the picked image's own
   background color, sampled once per image pick, not a per-frame
   computation.** `Overlay.qml` draws the loaded image into a hidden 32x32
