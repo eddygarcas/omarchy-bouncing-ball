@@ -243,6 +243,7 @@ Panel {
             Text {
               visible: !!(root.svc && root.svc.imagePath)
               text: root.svc ? root.svc.imagePath.split("/").pop() : ""
+              textFormat: Text.PlainText
               color: Qt.darker(root.bar.foreground, 1.4)
               font.family: root.bar.fontFamily
               font.pixelSize: Style.font.caption

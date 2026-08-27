@@ -63,7 +63,11 @@ QtObject {
   }
 
   property Process cursorPollProcess: Process {
-    command: ["hyprctl", "-j", "cursorpos"]
+    // Bound at the pipe with `head -c` -- a legit `cursorpos` reply is a
+    // couple dozen bytes; capping well above that (not in the collector,
+    // which has no size limit of its own) keeps a misbehaving/compromised
+    // hyprctl from growing this persistent shell's memory unbounded.
+    command: ["sh", "-c", "exec hyprctl -j cursorpos | head -c 4096"]
     stdout: StdioCollector { id: cursorPollStdout; waitForEnd: true }
     onExited: function(exitCode, exitStatus) {
       try {
@@ -187,7 +191,10 @@ QtObject {
   function pickImage() {
     if (root.imagePickerRunning) return
     root.imagePickerRunning = true
-    imagePickerProcess.command = ["omarchy-menu-images", Quickshell.env("HOME") + "/Pictures"]
+    // Bound at the pipe with `head -c`, same reasoning as cursorPollProcess
+    // above -- PATH_MAX is 4096 on Linux, so a legit picked path never gets
+    // near the cap. `$1` keeps the target dir out of shell interpolation.
+    imagePickerProcess.command = ["sh", "-c", "exec omarchy-menu-images \"$1\" | head -c 4096", "sh", Quickshell.env("HOME") + "/Pictures"]
     imagePickerProcess.running = true
   }
 
