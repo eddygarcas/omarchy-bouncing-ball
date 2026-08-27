@@ -94,9 +94,11 @@ function randomVelocity(speed) {
 // cursor can't produce an unbounded/divergent acceleration; nothing else
 // about this mode treats reaching the attractor as a collision or a
 // win/lose state the way Landing's floor does -- it just slingshots
-// through. Screen edges still bounce plainly (this mode never hits the
-// "landing"/"gravity" branches below), so an escaping orbit bounces around
-// rather than flying off forever.
+// through. Screen edges wrap instead of bouncing (see the dedicated branch
+// near the bottom) -- a wall bounce is an arbitrary rule the orbit math
+// itself has no opinion about, so a wide/fast orbit that swings off one
+// edge reappears from the opposite one and keeps orbiting, rather than
+// caroming off a boundary that isn't part of the physical model.
 //
 // "landing" additionally reads thrustUp/thrustLeft/thrustRight (booleans,
 // held-key state -- see Overlay.qml's keyboard handling) and
@@ -156,43 +158,57 @@ function step(state, dt) {
   var maxX = Math.max(0, s.width - s.size)
   var maxY = Math.max(0, s.height - s.size)
 
-  if (s.x < 0) { s.x = 0; s.vx = Math.abs(s.vx) }
-  else if (s.x > maxX) { s.x = maxX; s.vx = -Math.abs(s.vx) }
+  if (s.mode === "orbit") {
+    // Toroidal wraparound: once the ball has fully left one edge, it
+    // reappears from the opposite one rather than bouncing back in --
+    // preserves how far past the edge it had already traveled (adds/
+    // subtracts the exact wrap span instead of snapping to 0/width) so the
+    // crossing itself reads as continuous motion, not a hard teleport.
+    var spanX = s.width + s.size
+    var spanY = s.height + s.size
+    if (s.x < -s.size) s.x += spanX
+    else if (s.x > s.width) s.x -= spanX
+    if (s.y < -s.size) s.y += spanY
+    else if (s.y > s.height) s.y -= spanY
+  } else {
+    if (s.x < 0) { s.x = 0; s.vx = Math.abs(s.vx) }
+    else if (s.x > maxX) { s.x = maxX; s.vx = -Math.abs(s.vx) }
 
-  if (s.y < 0) {
-    s.y = 0
-    s.vy = Math.abs(s.vy)
-  } else if (s.mode === "landing") {
-    if (s.y >= maxY) {
+    if (s.y < 0) {
+      s.y = 0
+      s.vy = Math.abs(s.vy)
+    } else if (s.mode === "landing") {
+      if (s.y >= maxY) {
+        s.y = maxY
+        if (!s.landingResult) {
+          var impactSpeed = Math.hypot(s.vx, s.vy)
+          s.landingResult = impactSpeed < landingSpeedThreshold ? "success" : "crash"
+        }
+        if (s.landingResult === "success") {
+          s.vx = 0
+          s.vy = 0
+        } else {
+          s.vy = -Math.abs(s.vy) * damping
+          s.vx *= 0.92
+          if (Math.abs(s.vy) < 40) s.vy = 0
+        }
+      } else if (s.thrustUp) {
+        // Only a deliberate up-thrust clears the prior outcome for a fresh
+        // attempt -- a "crash" needs to keep reading as a crash through its
+        // own passive bounce-and-settle (the same damped bounce physics
+        // Gravity drop always does), not flip back to "no result yet" (and
+        // then possibly "success") the instant it bounces back off the floor
+        // on its own.
+        s.landingResult = ""
+      }
+    } else if (s.y > maxY) {
       s.y = maxY
-      if (!s.landingResult) {
-        var impactSpeed = Math.hypot(s.vx, s.vy)
-        s.landingResult = impactSpeed < landingSpeedThreshold ? "success" : "crash"
-      }
-      if (s.landingResult === "success") {
-        s.vx = 0
-        s.vy = 0
-      } else {
+      if (s.mode === "gravity") {
         s.vy = -Math.abs(s.vy) * damping
-        s.vx *= 0.92
         if (Math.abs(s.vy) < 40) s.vy = 0
+      } else {
+        s.vy = -Math.abs(s.vy)
       }
-    } else if (s.thrustUp) {
-      // Only a deliberate up-thrust clears the prior outcome for a fresh
-      // attempt -- a "crash" needs to keep reading as a crash through its
-      // own passive bounce-and-settle (the same damped bounce physics
-      // Gravity drop always does), not flip back to "no result yet" (and
-      // then possibly "success") the instant it bounces back off the floor
-      // on its own.
-      s.landingResult = ""
-    }
-  } else if (s.y > maxY) {
-    s.y = maxY
-    if (s.mode === "gravity") {
-      s.vy = -Math.abs(s.vy) * damping
-      if (Math.abs(s.vy) < 40) s.vy = 0
-    } else {
-      s.vy = -Math.abs(s.vy)
     }
   }
 
