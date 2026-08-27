@@ -429,6 +429,19 @@ Panel {
             font.family: root.bar.fontFamily
             font.pixelSize: Style.font.caption
           }
+
+          Toggle {
+            visible: !!(root.svc && root.svc.mode === "orbit")
+            width: parent.width
+            label: "Wrap Screen Edges"
+            description: root.svc && root.svc.orbitWrapEdges
+              ? "On -- swinging past an edge reappears from the opposite one, orbit unbounded."
+              : "Off -- bounces off all four edges instead, orbit stays on screen."
+            checked: !!(root.svc && root.svc.orbitWrapEdges)
+            foreground: root.bar.foreground
+            fontFamily: root.bar.fontFamily
+            onClicked: if (root.svc) root.svc.orbitWrapEdges = !root.svc.orbitWrapEdges
+          }
         }
       }
     }

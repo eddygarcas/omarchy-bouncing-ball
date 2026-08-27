@@ -94,11 +94,12 @@ function randomVelocity(speed) {
 // cursor can't produce an unbounded/divergent acceleration; nothing else
 // about this mode treats reaching the attractor as a collision or a
 // win/lose state the way Landing's floor does -- it just slingshots
-// through. Screen edges wrap instead of bouncing (see the dedicated branch
-// near the bottom) -- a wall bounce is an arbitrary rule the orbit math
-// itself has no opinion about, so a wide/fast orbit that swings off one
-// edge reappears from the opposite one and keeps orbiting, rather than
-// caroming off a boundary that isn't part of the physical model.
+// through. `wrapEdges` (bool, orbit-only, see the dedicated branch near the
+// bottom) picks how the viewport boundary behaves: true wraps a ball that
+// swings past one edge around to reappear from the opposite one and keep
+// orbiting -- a wall bounce is an arbitrary rule the orbit math itself has
+// no opinion about; false instead bounces off all four edges like the
+// other modes, for a bounded variant of the same attraction.
 //
 // "landing" additionally reads thrustUp/thrustLeft/thrustRight (booleans,
 // held-key state -- see Overlay.qml's keyboard handling) and
@@ -158,7 +159,7 @@ function step(state, dt) {
   var maxX = Math.max(0, s.width - s.size)
   var maxY = Math.max(0, s.height - s.size)
 
-  if (s.mode === "orbit") {
+  if (s.mode === "orbit" && s.wrapEdges) {
     // Toroidal wraparound: once the ball has fully left one edge, it
     // reappears from the opposite one rather than bouncing back in --
     // preserves how far past the edge it had already traveled (adds/

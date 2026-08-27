@@ -43,6 +43,14 @@ QtObject {
   property real cursorX: viewportWidth / 2
   property real cursorY: viewportHeight / 2
 
+  // "orbit" mode only: true wraps the ball around to the opposite screen
+  // edge instead of bouncing off it (see Model.js's step()) -- default on,
+  // since an unbounded orbit is the mode's whole premise (no floor, no
+  // walls, just the cursor's pull). Off gives a bounded variant that
+  // caroms off the viewport like the other physics modes, for anyone who
+  // wants the orbit's attraction without the ball ever leaving view.
+  property bool orbitWrapEdges: true
+
   // `hyprctl cursorpos` answers in Hyprland's GLOBAL (all-monitors)
   // coordinate space, but x/y/viewportWidth/viewportHeight here are all
   // local to whichever single output this overlay is anchored to -- on
@@ -241,7 +249,8 @@ QtObject {
       width: root.viewportWidth, height: root.viewportHeight,
       thrustUp: root.thrustUp, thrustLeft: root.thrustLeft, thrustRight: root.thrustRight,
       landingResult: root.landingResult,
-      attractorX: root.cursorX, attractorY: root.cursorY
+      attractorX: root.cursorX, attractorY: root.cursorY,
+      wrapEdges: root.orbitWrapEdges
     }, dt)
     root.x = next.x
     root.y = next.y
@@ -295,7 +304,8 @@ QtObject {
         thrustRight: root.thrustRight,
         landingResult: root.landingResult,
         cursorX: root.cursorX,
-        cursorY: root.cursorY
+        cursorY: root.cursorY,
+        orbitWrapEdges: root.orbitWrapEdges
       })
     }
     // Mirror what the settings panel's buttons already do, so a keybinding
@@ -303,6 +313,7 @@ QtObject {
     function setSize(value: string): string { root.size = Number(value); return String(root.size) }
     function setMode(value: string): string { root.mode = value; return root.mode }
     function setGravity(value: string): string { root.gravity = Number(value); return String(root.gravity) }
+    function setOrbitWrapEdges(value: string): string { root.orbitWrapEdges = value === "true"; return String(root.orbitWrapEdges) }
     function setStyle(value: string): string { root.style = value; return root.style }
     function setSpeedIpc(value: string): string { root.setSpeed(Number(value)); return String(root.speed) }
     function keepAwakeStart(value: string): string { root.startKeepAwake(Number(value)); return String(root.keepAwakeMinutes) }

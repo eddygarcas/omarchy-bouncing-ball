@@ -67,8 +67,10 @@ Click the bar icon (a soccer ball) to open the panel:
   instead, pulled by a real inverse-square gravity well centered on it.
   Move your mouse and the well moves with it; a close pass slingshots the
   ball hard, a distant one barely curves its path, same as an actual
-  two-body orbit. Screen edges wrap instead of bouncing here — swing off
-  one side and the ball reappears from the opposite one, still orbiting).
+  two-body orbit. A **Wrap Screen Edges** toggle (on by default) picks how
+  the viewport boundary behaves: on, swinging past one edge reappears from
+  the opposite one and keeps orbiting unbounded; off, it bounces off all
+  four edges like the other physics modes instead).
 - **Gravity** — a slider (50–2000 px/s²) for free adjustment, plus Moon /
   Mars / Earth preset buttons that jump straight to real-world-scaled
   values and light up whenever the slider happens to land exactly on one.
