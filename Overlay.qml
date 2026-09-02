@@ -280,6 +280,111 @@ Item {
       onAvgColorChanged: canvas.requestPaint()
     }
 
+    // "blackhole" style only: the real desktop wallpaper, loaded once and
+    // reused as the lensing halo's texture source below (the DEFAULT
+    // source -- see blackholeLiveCapture below for the opt-in alternative).
+    // Hidden -- like textureImage above, it exists purely to hand pixels to
+    // a ShaderEffectSource, never drawn directly. This window sits at
+    // WlrLayer.Overlay, ABOVE every app window, so a plain full-opacity
+    // copy of the wallpaper drawn here would blank out the whole desktop,
+    // not just stand in for the real wallpaper layer underneath. Same
+    // PreserveAspectCrop fill mode + full-window size as Omarchy's own
+    // /usr/share/omarchy/shell/plugins/background/Background.qml, so this
+    // copy crops identically to the real thing and a locally-warped patch
+    // of it lines up seamlessly with the real wallpaper just outside it.
+    Image {
+      id: wallpaperImage
+      visible: false
+      anchors.fill: parent
+      asynchronous: true
+      cache: true
+      fillMode: Image.PreserveAspectCrop
+      source: root.service && root.service.style === "blackhole" && !root.service.blackholeLiveCapture && root.service.wallpaperPath
+        ? Util.fileUrl(root.service.wallpaperPath)
+        : ""
+    }
+
+    // Opt-in alternative to wallpaperImage above (see Service.qml's
+    // blackholeLiveCapture doc comment for the cost/privacy reasoning): a
+    // ONE-SHOT snapshot of this monitor's real composited output, via
+    // Quickshell's ScreencopyView (Hyprland's wlr-screencopy protocol --
+    // the same one `grim` uses), then held and reused exactly like
+    // wallpaperImage's static file -- NOT a continuous live feed. Confirmed
+    // directly against Quickshell's own C++ source (view.cpp): with `live:
+    // false`, setting `captureSource` triggers exactly one automatic
+    // capture (`captureFrame()` called once from `createContext()`), and
+    // `hasContent` then stays true holding that single frame -- no
+    // per-frame re-capture happens the way `live: true` does. This is
+    // deliberately closer to "take a screenshot, then treat it like a
+    // background image" than to real-time screen mirroring: much cheaper
+    // than continuous capture, and the halo's actual warp math is
+    // downstream and identical either way (see haloSource/haloEffect
+    // below), so this reuses the exact same rendering path wallpaperImage
+    // already does -- the only difference is where the one static texture
+    // came from. `captureSource` is set to null whenever this isn't the
+    // active mode (confirmed via the same source: nulling it destroys the
+    // context and discards the held frame, `hasContent` goes back to
+    // false) rather than just left bound-but-unused, so this never holds
+    // captured screen content in memory outside of Black Hole + Live
+    // Screen Capture actually being active+bouncing. Re-entering that
+    // state (e.g. re-toggling, or restarting the ball) takes a fresh
+    // snapshot each time, same as re-picking the same file would reload
+    // wallpaperImage.
+    ScreencopyView {
+      id: screenCapture
+      visible: false
+      anchors.fill: parent
+      live: false
+      captureSource: (root.service && root.service.enabled && root.service.style === "blackhole"
+        && root.service.blackholeLiveCapture && window.screen) ? window.screen : null
+    }
+
+    // Crops whichever of the two sources above is active down to a small
+    // square centered on the ball -- see lens.frag's own docblock for why
+    // the shader itself only ever needs to deal with plain 0..1 local UV
+    // once this crop is done here. `visible: false` so this item itself
+    // never draws the UNdistorted patch directly; only haloEffect below
+    // (which samples this as a texture) is ever actually shown.
+    ShaderEffectSource {
+      id: haloSource
+      visible: false
+      sourceItem: (root.service && root.service.blackholeLiveCapture) ? screenCapture : wallpaperImage
+      live: true
+      width: root.service ? root.service.size * 4 : 0
+      height: width
+      sourceRect: Qt.rect(
+        (root.service ? root.service.x + root.service.size / 2 : 0) - width / 2,
+        (root.service ? root.service.y + root.service.size / 2 : 0) - height / 2,
+        width, height
+      )
+    }
+
+    // Declared BEFORE `canvas` below so the ball itself, painted after,
+    // naturally covers this layer's own center -- the "event horizon" is
+    // just the opaque ball on top, nothing here needs to know its shape.
+    // `horizon` (0.25) is a fixed constant, not computed per-frame: it's
+    // the ball's radius as a fraction of this halo's own half-width, i.e.
+    // (size/2) / (size*4/2), which cancels `size` out entirely. `strength`
+    // scales with the existing Gravity slider/presets (see Panel.qml) so
+    // "stronger gravity" reads as "stronger visual pull" too, same knob
+    // Zero-G Orbit's actual motion already uses.
+    ShaderEffect {
+      id: haloEffect
+      visible: !!(root.service && root.service.enabled && root.service.style === "blackhole"
+        && (root.service.blackholeLiveCapture ? screenCapture.hasContent : wallpaperImage.status === Image.Ready))
+      width: haloSource.width
+      height: haloSource.height
+      x: haloSource.sourceRect.x
+      y: haloSource.sourceRect.y
+
+      property variant source: haloSource
+      property real strength: root.service ? 0.05 * (root.service.gravity / 900) : 0.05
+      property real swirl: 0.6
+      property real horizon: 0.25
+
+      fragmentShader: "lens.frag.qsb"
+    }
+
     Canvas {
       id: canvas
       visible: !!(root.service && root.service.enabled)

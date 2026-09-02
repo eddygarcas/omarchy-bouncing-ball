@@ -64,7 +64,7 @@ QtObject {
 
   property Timer cursorPollTimer: Timer {
     interval: 33
-    running: root.enabled && root.mode === "orbit"
+    running: root.enabled && (root.mode === "orbit" || root.mode === "blackhole")
     repeat: true
     triggeredOnStart: true
     onTriggered: if (!cursorPollProcess.running) cursorPollProcess.running = true
@@ -106,6 +106,63 @@ QtObject {
     root.thrustUp = false
     root.thrustLeft = false
     root.thrustRight = false
+    // "Black Hole" is a single bundled option even though it's really two
+    // independent properties (mode drives motion, style drives the ball's
+    // look + Overlay.qml's lensing halo) -- picking either preset button
+    // sets both, same shape as imagePickerProcess below setting imagePath
+    // AND style together from one action. No ping-pong: QML only refires a
+    // changed handler on an actual value change, so once style is already
+    // "blackhole" this is a no-op.
+    if (root.mode === "blackhole") root.style = "blackhole"
+  }
+
+  onStyleChanged: if (root.style === "blackhole") root.mode = "blackhole"
+
+  // "blackhole" style only: the real desktop wallpaper file, re-resolved
+  // every few seconds while active so a theme/background change is picked
+  // up live -- see Overlay.qml's lensing halo, which loads this path as its
+  // ShaderEffectSource's texture. Wallpaper changes are rare (nothing like
+  // cursorPollTimer's 30/s orbit-tracking cadence is needed), so this polls
+  // far more slowly.
+  property string wallpaperPath: ""
+
+  property Timer wallpaperPollTimer: Timer {
+    interval: 3000
+    running: root.enabled && root.style === "blackhole" && !root.blackholeLiveCapture
+    repeat: true
+    triggeredOnStart: true
+    onTriggered: if (!wallpaperPollProcess.running) wallpaperPollProcess.running = true
+  }
+
+  // Off by default -- opt-in. When on, the lensing halo's texture comes
+  // from a ONE-SHOT snapshot of the real composited output (via
+  // Quickshell's ScreencopyView, i.e. real Wayland screen capture through
+  // wlr-screencopy) instead of the static wallpaper file -- captured once
+  // when this mode (re)activates, then held and reused exactly like a
+  // static picture for as long as it stays active, NOT a continuous live
+  // feed (see Overlay.qml's screenCapture for exactly how/why -- confirmed
+  // against Quickshell's own source that `live: false` really does mean
+  // "capture once, then hold," not "capture rarely"). So windows sitting
+  // under the halo AT THE MOMENT of that snapshot get warped too, not just
+  // covered by it -- though a window that later moves or changes won't be
+  // reflected until the next snapshot. Deliberately still not the default:
+  // even a one-shot capture is a real capability escalation compared to
+  // reading a picture file -- this plugin would be reading whatever's
+  // actually on screen (any window's content) at that instant. Nothing is
+  // ever saved or transmitted either way; this flag only changes where the
+  // halo's one static texture comes from.
+  property bool blackholeLiveCapture: false
+
+  property Process wallpaperPollProcess: Process {
+    // Same head -c bounding as cursorPollProcess below -- a real resolved
+    // path is well under PATH_MAX (4096); this just keeps a misbehaving
+    // readlink from growing this persistent shell's memory unbounded.
+    command: ["sh", "-c", "exec readlink -f \"$HOME/.local/state/omarchy/current/background\" | head -c 4096"]
+    stdout: StdioCollector { id: wallpaperPollStdout; waitForEnd: true }
+    onExited: function(exitCode, exitStatus) {
+      var path = wallpaperPollStdout.text ? wallpaperPollStdout.text.trim() : ""
+      if (path.length > 0) root.wallpaperPath = path
+    }
   }
 
   // Absolute path to the image last picked for the "image" style. Chosen via
@@ -136,12 +193,13 @@ QtObject {
       root.vx = 0
       root.vy = 0
       root.landingResult = ""
-    } else if (root.mode === "orbit") {
+    } else if (root.mode === "orbit" || root.mode === "blackhole") {
       // A radial kick would just dive straight into the attractor and get
       // slingshot out unpredictably -- a TANGENTIAL kick (perpendicular to
       // the line from the ball to the cursor) is what actually makes it
       // orbit instead of collide, same as giving a satellite sideways
-      // velocity instead of dropping it straight down.
+      // velocity instead of dropping it straight down. "blackhole" reuses
+      // this identically -- see the shared step() docblock in Model.js.
       var dx0 = root.cursorX - (root.x + root.size / 2)
       var dy0 = root.cursorY - (root.y + root.size / 2)
       var r0 = Math.max(1, Math.hypot(dx0, dy0))
@@ -305,7 +363,9 @@ QtObject {
         landingResult: root.landingResult,
         cursorX: root.cursorX,
         cursorY: root.cursorY,
-        orbitWrapEdges: root.orbitWrapEdges
+        orbitWrapEdges: root.orbitWrapEdges,
+        wallpaperPath: root.wallpaperPath,
+        blackholeLiveCapture: root.blackholeLiveCapture
       })
     }
     // Mirror what the settings panel's buttons already do, so a keybinding
@@ -315,6 +375,7 @@ QtObject {
     function setGravity(value: string): string { root.gravity = Number(value); return String(root.gravity) }
     function setOrbitWrapEdges(value: string): string { root.orbitWrapEdges = value === "true"; return String(root.orbitWrapEdges) }
     function setStyle(value: string): string { root.style = value; return root.style }
+    function setBlackholeLiveCapture(value: string): string { root.blackholeLiveCapture = value === "true"; return String(root.blackholeLiveCapture) }
     function setSpeedIpc(value: string): string { root.setSpeed(Number(value)); return String(root.speed) }
     function keepAwakeStart(value: string): string { root.startKeepAwake(Number(value)); return String(root.keepAwakeMinutes) }
     function keepAwakeStop(): string { root.stopKeepAwake(); return "stopped" }

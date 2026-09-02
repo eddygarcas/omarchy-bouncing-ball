@@ -345,14 +345,17 @@ Panel {
             }
           }
 
-          // Gravity drop, Landing, and Zero-G Orbit all apply gravity -- see
-          // Model.js's step(). The slider gives free control over the exact
-          // value; the preset buttons below jump straight to Moon/Mars/Earth
-          // and -- via the same `active` highlight every other preset row in
-          // this panel already uses -- double as a check for whether the
-          // slider is currently sitting exactly on one of them.
+          // Gravity drop, Landing, Zero-G Orbit, and Black Hole all apply
+          // gravity -- see Model.js's step() (Black Hole reuses Orbit's own
+          // motion outright, and also drives the lensing halo's visual
+          // strength off this same value -- see Overlay.qml). The slider
+          // gives free control over the exact value; the preset buttons
+          // below jump straight to Moon/Mars/Earth and -- via the same
+          // `active` highlight every other preset row in this panel already
+          // uses -- double as a check for whether the slider is currently
+          // sitting exactly on one of them.
           Column {
-            visible: !!(root.svc && (root.svc.mode === "gravity" || root.svc.mode === "landing" || root.svc.mode === "orbit"))
+            visible: !!(root.svc && (root.svc.mode === "gravity" || root.svc.mode === "landing" || root.svc.mode === "orbit" || root.svc.mode === "blackhole"))
             width: parent.width
             spacing: Style.space(6)
 
@@ -430,8 +433,31 @@ Panel {
             font.pixelSize: Style.font.caption
           }
 
+          Text {
+            visible: !!(root.svc && root.svc.mode === "blackhole")
+            width: parent.width
+            wrapMode: Text.WordWrap
+            text: "The ball becomes a black hole, orbited by your mouse cursor just like Zero-G Orbit, with the real desktop wallpaper visibly lensed around it. Higher Gravity below means both a tighter orbit and a stronger visual pull."
+            color: Qt.darker(root.bar.foreground, 1.4)
+            font.family: root.bar.fontFamily
+            font.pixelSize: Style.font.caption
+          }
+
           Toggle {
-            visible: !!(root.svc && root.svc.mode === "orbit")
+            visible: !!(root.svc && root.svc.mode === "blackhole")
+            width: parent.width
+            label: "Screen Capture Snapshot"
+            description: root.svc && root.svc.blackholeLiveCapture
+              ? "On -- takes one snapshot of the real screen (windows included) each time this starts, then warps that like a picture. Not continuous; won't reflect later changes until re-triggered."
+              : "Off (default) -- warps the wallpaper picture only; a window under the halo just gets covered by it, not warped itself."
+            checked: !!(root.svc && root.svc.blackholeLiveCapture)
+            foreground: root.bar.foreground
+            fontFamily: root.bar.fontFamily
+            onClicked: if (root.svc) root.svc.blackholeLiveCapture = !root.svc.blackholeLiveCapture
+          }
+
+          Toggle {
+            visible: !!(root.svc && (root.svc.mode === "orbit" || root.svc.mode === "blackhole"))
             width: parent.width
             label: "Wrap Screen Edges"
             description: root.svc && root.svc.orbitWrapEdges

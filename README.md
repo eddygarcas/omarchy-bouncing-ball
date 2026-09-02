@@ -45,8 +45,10 @@ Click the bar icon (a soccer ball) to open the panel:
 
 - **Bounce!** — starts/stops the ball.
 - **Style** — Amiga (red/white checker sphere), Solid (pick from 6 colors),
-  or Image (wrap a picture of your own around it — click **Choose Image…**
-  to pick one from `~/Pictures` via Omarchy's own image picker).
+  Image (wrap a picture of your own around it — click **Choose Image…** to
+  pick one from `~/Pictures` via Omarchy's own image picker), or Black Hole
+  (see below — bundled with the Black Hole physics mode; picking either one
+  sets the other automatically).
 - **Size** — S / M / L / XL / XXL.
 - **Speed** — Chill / Normal / Fast / Turbo.
 - **Physics** — Classic bounce (constant velocity, bounces off all four
@@ -70,18 +72,32 @@ Click the bar icon (a soccer ball) to open the panel:
   two-body orbit. A **Wrap Screen Edges** toggle (on by default) picks how
   the viewport boundary behaves: on, swinging past one edge reappears from
   the opposite one and keeps orbiting unbounded; off, it bounces off all
-  four edges like the other physics modes instead).
+  four edges like the other physics modes instead), or Black Hole (the
+  exact same orbit motion as Zero-G Orbit -- same well, same Wrap Screen
+  Edges toggle -- but the ball itself renders as a near-black event-horizon
+  disc with a bright photon ring, and the real desktop wallpaper right
+  around it is visibly bent/swirled by a genuine pixel-displacement shader,
+  like light lensing around a real black hole. Picking this also switches
+  Style to Black Hole, and picking Black Hole from Style switches Physics
+  here too -- it's one bundled option, not two independent ones). A
+  **Screen Capture Snapshot** toggle (off by default) switches the halo's
+  source from the wallpaper picture to a one-shot snapshot of the real
+  desktop (via Wayland screen capture), taken once each time this starts
+  and then warped just like a picture from then on -- not a continuous
+  feed, so windows under the halo get warped too instead of just covered,
+  but only as they looked at that snapshot moment. See Known limitations
+  and Permissions & dependencies below for the trade-off this involves.
 - **Gravity** — a slider (50–2000 px/s²) for free adjustment, plus Moon /
   Mars / Earth preset buttons that jump straight to real-world-scaled
   values and light up whenever the slider happens to land exactly on one.
-  Only shown while Gravity drop, Landing, or Zero-G Orbit is selected
-  (Classic bounce ignores gravity entirely). Earth (900 px/s²) is the same
-  strength Gravity drop and Landing always used; Moon (150) and Mars (340)
-  are scaled down proportionally to their real surface gravity, so Landing
-  under Moon gravity gives you a much longer, more forgiving descent to
-  practice a soft touchdown than Earth does. In Zero-G Orbit the same
-  number instead sets how strongly the cursor pulls: higher means a
-  tighter, faster orbit.
+  Only shown while Gravity drop, Landing, Zero-G Orbit, or Black Hole is
+  selected (Classic bounce ignores gravity entirely). Earth (900 px/s²) is
+  the same strength Gravity drop and Landing always used; Moon (150) and
+  Mars (340) are scaled down proportionally to their real surface gravity,
+  so Landing under Moon gravity gives you a much longer, more forgiving
+  descent to practice a soft touchdown than Earth does. In Zero-G Orbit and
+  Black Hole the same number instead sets how strongly the cursor pulls;
+  in Black Hole it also scales how strong the visual lensing looks.
 - **Keep Awake** — a toggle plus a slider (0 to 3 hours, in 5-minute steps;
   0 means "until you turn it off"). Turning it on starts the ball bouncing
   if it isn't already and inhibits the system idle cycle for the chosen
@@ -117,6 +133,20 @@ and nothing persists once it's off.
 
 - **Single monitor.** It bounces on whichever screen its overlay window
   lands on; there's no per-monitor roaming.
+- **Black Hole's lensing halo warps the wallpaper FILE by default, not
+  real screen content.** It samples `~/.local/state/omarchy/current/background`
+  directly, so it lines up seamlessly with the real desktop wherever
+  that's actually what's showing -- but if a real app window happens to be
+  sitting under the halo, the effect shows wallpaper-based warping over
+  part of that window rather than warping the window itself. This is the
+  same category of limitation the ball itself has always had (it already
+  paints opaquely over whatever's beneath it, app windows included), just
+  extended slightly beyond the ball's own circle. The opt-in **Screen
+  Capture Snapshot** toggle warps real window content too, at the cost
+  described under Permissions & dependencies below -- but since it's a
+  ONE-SHOT snapshot taken when it starts, not a continuous feed, a window
+  that moves, changes, or appears after that moment still won't be
+  reflected until the next snapshot (re-toggling, or restarting the ball).
 - **Settings don't persist** across `omarchy restart shell` — resets to
   Amiga / Medium / Normal / Classic bounce each time. In-memory only, no
   config file, since this is a toy rather than something worth persisting.
@@ -249,12 +279,17 @@ and nothing persists once it's off.
 
 ## Permissions & dependencies
 
-- No external packages or network access required -- everything used ships
-  with Omarchy itself.
+- No external packages or network access required to RUN this plugin --
+  everything it needs at runtime ships with Omarchy itself. (The one
+  build-time-only exception, `qt6-shadertools`, is explained under Black
+  Hole below -- it was needed once, by this plugin's author, to compile a
+  shader that's already committed to the repo; it is not needed by you.)
 - Runs mostly inside the shared `omarchy-shell` process via a background
   service, a bar-widget settings panel, and a full-screen click-through
-  overlay -- no files written to disk. The one exception is Zero-G Orbit
-  (see below), which spawns short-lived `hyprctl` subprocesses.
+  overlay -- no files written to disk. The two exceptions are Zero-G Orbit
+  and Black Hole (see below), which spawn short-lived `hyprctl`
+  subprocesses, and Black Hole additionally reads (never writes) the
+  active wallpaper file.
 - **Zero-G Orbit** needs the live global mouse position to orbit around,
   but the overlay is deliberately click-through and so never holds pointer
   focus -- it can't receive continuous Wayland mouse-move events the way a
@@ -263,6 +298,50 @@ and nothing persists once it's off.
   a real subprocess (`Quickshell.Io.Process`) at 30/s, well under the 60Hz
   physics tick, and only while this mode is actually selected and
   bouncing -- never while any other mode is active or the ball is stopped.
+- **Black Hole** reads (never writes) two files: it polls
+  `~/.local/state/omarchy/current/background` (the same symlink Omarchy's
+  own background layer follows) every ~3s while active, and loads whatever
+  it currently points at as a texture for the lensing halo's shader. The
+  cursor-polling `hyprctl` subprocess described above is shared with this
+  mode too, since Black Hole reuses Zero-G Orbit's motion outright. The
+  halo itself is a real GPU fragment shader (`lens.frag`, compiled to
+  `lens.frag.qsb` and committed alongside its source so it's rebuildable
+  and reviewable) rather than a per-pixel Canvas trick -- **that compiled
+  file is the one binary artifact in this repo.** It was built once, here,
+  with `qt6-shadertools`' `qsb` tool (`qsb --glsl "100 es,120,150" -o
+  lens.frag.qsb lens.frag`); confirmed empirically (an isolated
+  `quickshell -n -p <scratch>` test instance, checking `/proc/<pid>/maps`)
+  that running a compiled `.qsb` via `ShaderEffect` does NOT load
+  `libQt6ShaderTools` at runtime -- only the same Qt6 libraries
+  `omarchy-shell` already links. **`qt6-shadertools` is a build-time-only
+  tool; end users need nothing beyond what a normal Omarchy install
+  already has to run this style.**
+- **Black Hole's Screen Capture Snapshot toggle** (off by default) is a
+  real, material change from the default behavior above -- but a ONE-SHOT
+  one, not a continuous feed: while it's on, each time Black Hole
+  (re)starts the halo takes exactly one snapshot of this monitor's real
+  composited output -- via Quickshell's `ScreencopyView`
+  (`Quickshell.Wayland`) with `live: false`, which uses Hyprland's
+  `wlr-screencopy` protocol, the same one `grim` (this repo's own
+  screenshot tool) uses -- and then holds and reuses that single frame
+  exactly like the wallpaper file, instead of reading from disk. Confirmed
+  directly against Quickshell's own C++ source that `live: false` really
+  does mean "capture once, then hold" (no per-frame re-capture the way
+  `live: true` would) -- and separately, via an isolated, non-visual test
+  (`quickshell -n -p <scratch>`, checking `hasContent`/`sourceSize` via
+  `console.log` only, twice a couple seconds apart, confirming it stays
+  true and doesn't need a running feed -- deliberately never rendered or
+  screenshotted, to avoid capturing this machine's own real screen content
+  as part of testing) that a real capture genuinely completes and holds.
+  That one snapshot reads whatever's genuinely on screen at that instant,
+  including the content of any real window under the halo -- but it won't
+  reflect anything that changes after that moment until the next snapshot
+  (re-toggling, or restarting the ball). Nothing is ever written to disk
+  or sent anywhere by this plugin either way -- the captured frame only
+  ever feeds the same shader the wallpaper path already uses -- but even a
+  one-shot read of real screen content is a meaningfully bigger capability
+  than a picture-file read, which is exactly why it's opt-in rather than
+  the default.
 - **Choose Image…** shells out to `omarchy-menu-images` (ships with
   Omarchy) pointed at `~/Pictures`, the same fullscreen picker used for
   wallpapers and themes, rather than this plugin reimplementing a file
@@ -313,6 +392,8 @@ and nothing persists once it's off.
 | `Service.qml`  | Background physics + Keep Awake + image-picker state, IPC        |
 | `Overlay.qml`  | Full-screen click-through window that renders the ball          |
 | `Model.js`     | Presets, physics step function, and the ball-drawing routines   |
+| `lens.frag`    | Black Hole lensing halo's shader source (GLSL)                   |
+| `lens.frag.qsb`| `lens.frag`, compiled for `ShaderEffect` -- see Permissions above |
 
 ## License
 

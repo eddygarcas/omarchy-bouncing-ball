@@ -16,14 +16,16 @@ var speedPresets = [
 var stylePresets = [
   { label: "Amiga", value: "amiga" },
   { label: "Solid", value: "solid" },
-  { label: "Image", value: "image" }
+  { label: "Image", value: "image" },
+  { label: "Black Hole", value: "blackhole" }
 ]
 
 var physicsPresets = [
   { label: "Classic bounce", value: "classic" },
   { label: "Gravity drop", value: "gravity" },
   { label: "Landing", value: "landing" },
-  { label: "Zero-G Orbit", value: "orbit" }
+  { label: "Zero-G Orbit", value: "orbit" },
+  { label: "Black Hole", value: "blackhole" }
 ]
 
 // Scaled proportionally from real surface gravity (Earth 9.81 m/s^2) onto
@@ -76,27 +78,32 @@ function randomVelocity(speed) {
 }
 
 // Advances the physics state by dt seconds. `state` is a plain object with
-// x, y, vx, vy, size, mode ("classic"|"gravity"|"landing"|"orbit"), width,
-// height (viewport), gravity (px/s^2, only read for "gravity"/"landing"/
-// "orbit", defaults to Earth's 900 if omitted). "orbit" additionally reads
-// attractorX/attractorY (the point it orbits -- the live mouse cursor
-// position, see Service.qml/Overlay.qml) and applies a genuine inverse-
-// square attraction toward it rather than a constant downward pull: accel
-// = gravity * orbitRefRadius^2 / r^2, directed at the attractor, where r is
-// the distance from the ball's CENTER (not its x/y corner) to the
-// attractor. `gravity` is reused as-is from the other modes' slider/
-// presets, redefined here as "the acceleration at orbitRefRadius" so
-// picking Earth over Moon still reads as "stronger pull", but the force
-// falls off with the square of distance like a real orbit instead of
-// staying constant -- close passes near the attractor slingshot hard, far
-// ones barely curve at all. r is floored at the ball's own radius (a
-// standard N-body "softening" term) so passing near-dead-center over the
-// cursor can't produce an unbounded/divergent acceleration; nothing else
-// about this mode treats reaching the attractor as a collision or a
-// win/lose state the way Landing's floor does -- it just slingshots
-// through. `wrapEdges` (bool, orbit-only, see the dedicated branch near the
-// bottom) picks how the viewport boundary behaves: true wraps a ball that
-// swings past one edge around to reappear from the opposite one and keep
+// x, y, vx, vy, size, mode ("classic"|"gravity"|"landing"|"orbit"|
+// "blackhole"), width, height (viewport), gravity (px/s^2, only read for
+// "gravity"/"landing"/"orbit"/"blackhole", defaults to Earth's 900 if
+// omitted). "orbit" and "blackhole" share the exact same motion below --
+// "blackhole" is only a distinct visual style (see drawBlackHoleSphere and
+// Overlay.qml's lensing halo), the ball itself really is just orbiting the
+// cursor the same way "orbit" mode's ball always has -- and both
+// additionally read attractorX/attractorY (the point it orbits -- the live
+// mouse cursor position, see Service.qml/Overlay.qml) and apply a genuine
+// inverse-square attraction toward it rather than a constant downward
+// pull: accel = gravity * orbitRefRadius^2 / r^2, directed at the
+// attractor, where r is the distance from the ball's CENTER (not its x/y
+// corner) to the attractor. `gravity` is reused as-is from the other
+// modes' slider/presets, redefined here as "the acceleration at
+// orbitRefRadius" so picking Earth over Moon still reads as "stronger
+// pull", but the force falls off with the square of distance like a real
+// orbit instead of staying constant -- close passes near the attractor
+// slingshot hard, far ones barely curve at all. r is floored at the ball's
+// own radius (a standard N-body "softening" term) so passing near-dead-
+// center over the cursor can't produce an unbounded/divergent
+// acceleration; nothing else about this mode treats reaching the attractor
+// as a collision or a win/lose state the way Landing's floor does -- it
+// just slingshots through. `wrapEdges` (bool, orbit/blackhole-only, see
+// the dedicated branch near the bottom) picks how the viewport boundary
+// behaves: true wraps a ball that swings past one edge around to reappear
+// from the opposite one and keep
 // orbiting -- a wall bounce is an arbitrary rule the orbit math itself has
 // no opinion about; false instead bounces off all four edges like the
 // other modes, for a bounded variant of the same attraction.
@@ -136,7 +143,7 @@ function step(state, dt) {
 
   if (s.mode === "gravity" || s.mode === "landing") s.vy += gravity * dt
 
-  if (s.mode === "orbit") {
+  if (s.mode === "orbit" || s.mode === "blackhole") {
     var cx = s.x + s.size / 2
     var cy = s.y + s.size / 2
     var dx = s.attractorX - cx
@@ -159,7 +166,7 @@ function step(state, dt) {
   var maxX = Math.max(0, s.width - s.size)
   var maxY = Math.max(0, s.height - s.size)
 
-  if (s.mode === "orbit" && s.wrapEdges) {
+  if ((s.mode === "orbit" || s.mode === "blackhole") && s.wrapEdges) {
     // Toroidal wraparound: once the ball has fully left one edge, it
     // reappears from the opposite one rather than bouncing back in --
     // preserves how far past the edge it had already traveled (adds/
@@ -519,6 +526,11 @@ function drawBall(ctx, size, style, color, phaseDeg, image, imgWidth, imgHeight,
     ctx.translate(r, r)
     drawImageSphere(ctx, r, (phaseDeg || 0) * Math.PI / 180, image, imgWidth, imgHeight, imageFallbackColor || color)
     ctx.restore()
+  } else if (style === "blackhole") {
+    ctx.save()
+    ctx.translate(r, r)
+    drawBlackHoleSphere(ctx, r)
+    ctx.restore()
   } else {
     ctx.save()
     ctx.translate(r, r)
@@ -529,28 +541,68 @@ function drawBall(ctx, size, style, color, phaseDeg, image, imgWidth, imgHeight,
     ctx.restore()
   }
 
-  ctx.save()
-  ctx.translate(r, r)
+  // The shared pseudo-3D shading below (a dark rim + glossy highlight) makes
+  // every OTHER style read as a lit sphere rather than a flat disc -- but
+  // "blackhole" already draws its own bright photon-ring right at the
+  // silhouette edge (see drawBlackHoleSphere), which a rim gradient that
+  // DARKENS the same edge would partially cancel out. Skipped for that style
+  // only; its own function already draws everything it needs.
+  if (style !== "blackhole") {
+    ctx.save()
+    ctx.translate(r, r)
 
-  // Shared pseudo-3D shading: a soft dark rim and a glossy highlight so every
-  // style reads as a sphere rather than a flat disc.
-  var rim = ctx.createRadialGradient(0, 0, r * 0.6, 0, 0, r)
-  rim.addColorStop(0, "rgba(0,0,0,0)")
-  rim.addColorStop(1, "rgba(0,0,0,0.35)")
+    var rim = ctx.createRadialGradient(0, 0, r * 0.6, 0, 0, r)
+    rim.addColorStop(0, "rgba(0,0,0,0)")
+    rim.addColorStop(1, "rgba(0,0,0,0.35)")
+    ctx.beginPath()
+    ctx.arc(0, 0, r, 0, Math.PI * 2)
+    ctx.fillStyle = rim
+    ctx.fill()
+
+    var gloss = ctx.createRadialGradient(-r * 0.35, -r * 0.4, 0, -r * 0.35, -r * 0.4, r * 0.7)
+    gloss.addColorStop(0, "rgba(255,255,255,0.55)")
+    gloss.addColorStop(1, "rgba(255,255,255,0)")
+    ctx.beginPath()
+    ctx.arc(0, 0, r, 0, Math.PI * 2)
+    ctx.fillStyle = gloss
+    ctx.fill()
+
+    ctx.restore()
+  }
+}
+
+// Renders the "blackhole" style ball itself: a near-black event-horizon
+// disc plus a thin, bright photon ring right at the silhouette edge -- the
+// one visual element every real black-hole reference image shares,
+// independent of however dramatic its accretion disk/lensed background is.
+// The actual background lensing is a separate ShaderEffect halo layered
+// around this ball in Overlay.qml, not drawn here; this function only ever
+// touches pixels inside the ball's own circle, same vector-primitive-only
+// discipline (radial gradients + arcs, no per-pixel ops) as every other
+// style in this file.
+function drawBlackHoleSphere(ctx, r) {
+  var disc = ctx.createRadialGradient(0, 0, 0, 0, 0, r * 0.92)
+  disc.addColorStop(0, "#000000")
+  disc.addColorStop(1, "#050302")
   ctx.beginPath()
-  ctx.arc(0, 0, r, 0, Math.PI * 2)
-  ctx.fillStyle = rim
+  ctx.arc(0, 0, r * 0.92, 0, Math.PI * 2)
+  ctx.fillStyle = disc
   ctx.fill()
 
-  var gloss = ctx.createRadialGradient(-r * 0.35, -r * 0.4, 0, -r * 0.35, -r * 0.4, r * 0.7)
-  gloss.addColorStop(0, "rgba(255,255,255,0.55)")
-  gloss.addColorStop(1, "rgba(255,255,255,0)")
+  // An annulus (outer circle minus a slightly smaller inner one, opposite
+  // winding direction cancels the shared interior under the default
+  // nonzero fill rule) rather than a plain stroke, so the ring's own
+  // gradient can fade smoothly from transparent to solid white across its
+  // width instead of being a single flat stroke color.
+  var ring = ctx.createRadialGradient(0, 0, r * 0.86, 0, 0, r)
+  ring.addColorStop(0, "rgba(255,214,170,0)")
+  ring.addColorStop(0.75, "rgba(255,224,190,0.9)")
+  ring.addColorStop(1, "rgba(255,255,255,1)")
   ctx.beginPath()
-  ctx.arc(0, 0, r, 0, Math.PI * 2)
-  ctx.fillStyle = gloss
+  ctx.arc(0, 0, r, 0, Math.PI * 2, false)
+  ctx.arc(0, 0, r * 0.86, 0, Math.PI * 2, true)
+  ctx.fillStyle = ring
   ctx.fill()
-
-  ctx.restore()
 }
 
 if (typeof module !== "undefined") {
